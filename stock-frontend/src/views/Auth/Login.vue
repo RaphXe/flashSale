@@ -14,7 +14,7 @@ const loading = ref(false)
 const message = ref('')
 const messageType = ref('')
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8089'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost'
 
 async function handleLogin() {
 	if (!form.username || !form.password) {

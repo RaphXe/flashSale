@@ -16,7 +16,7 @@ const message = ref('')
 const messageType = ref('')
 const confirmPasswordError = ref('')
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8089'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost'
 
 function validateConfirmPassword() {
   if (!form.confirmPassword) {

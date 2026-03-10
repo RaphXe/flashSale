@@ -4,8 +4,8 @@ services:
     container_name: app-db
     restart: unless-stopped
     environment:
-      MYSQL_DATABASE: stock_database
-      MYSQL_ROOT_PASSWORD: 57154989Abc
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     volumes:
       - db_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -25,9 +25,9 @@ services:
       db:
         condition: service_healthy
     environment:
-      DB_URL: jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8
-      DB_USERNAME: root
-      DB_PASSWORD: 57154989Abc
+      DB_URL: ${DB_URL}
+      DB_USERNAME: ${DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD}
     networks:
       - app-network
 

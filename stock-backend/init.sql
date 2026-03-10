@@ -20,8 +20,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 -- ----------------------------
 -- Table structure for users
 -- ----------------------------
-CREATE DATABASE stock_database
-USE stock_database
+USE stock_database;
 DROP TABLE IF EXISTS `users`;
 CREATE TABLE `users`  (
   `id` bigint NOT NULL AUTO_INCREMENT,

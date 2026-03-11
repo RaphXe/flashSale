@@ -30,12 +30,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  app:
+  app1:
+    &app-template
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: app
     restart: unless-stopped
     depends_on:
       db:
@@ -51,6 +50,12 @@ services:
     networks:
       - app-network
 
+  app2:
+    <<: *app-template
+
+  app3:
+    <<: *app-template
+
   reverse-proxy:
     build:
       context: ..
@@ -60,7 +65,9 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - app
+      - app1
+      - app2
+      - app3
     networks:
       - app-network
 

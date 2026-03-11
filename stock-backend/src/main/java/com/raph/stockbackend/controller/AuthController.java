@@ -8,6 +8,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import java.net.InetAddress;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -60,4 +62,15 @@ public class AuthController {
             return ResponseEntity.badRequest().body(error);
         }
     }
-}
+
+    @GetMapping("/whoami")
+    public ResponseEntity<?> whoami() throws Exception {
+        InetAddress localHost = InetAddress.getLocalHost();
+
+        Map<String, String> response = new HashMap<>();
+        response.put("ip", localHost.getHostAddress());
+        response.put("hostname", localHost.getHostName());
+        response.put("timestamp", String.valueOf(System.currentTimeMillis()));
+        return ResponseEntity.ok(response);
+    }
+ }

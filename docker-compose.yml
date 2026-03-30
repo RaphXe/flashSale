@@ -1,0 +1,95 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: flashsale-db
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-stock_database}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./user/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - flashsale-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: flashsale-redis
+    restart: unless-stopped
+    command: [ "redis-server", "--appendonly", "yes" ]
+    volumes:
+      - redis_data:/data
+    networks:
+      - flashsale-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build:
+      context: .
+      dockerfile: user/Dockerfile
+    container_name: flashsale-user
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-123456}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+    networks:
+      - flashsale-network
+
+  gateway-service:
+    build:
+      context: .
+      dockerfile: gateway-api/Dockerfile
+    container_name: flashsale-gateway
+    restart: unless-stopped
+    depends_on:
+      user-service:
+        condition: service_started
+    environment:
+      USER_SERVICE_BASE_URL: ${USER_SERVICE_BASE_URL:-http://user-service:8081}
+      JWT_SECRET: ${JWT_SECRET:-replace-this-with-at-least-32-bytes-secret-key-123456}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+    ports:
+      - "${GATEWAY_HOST_PORT:-8080}:8080"
+    expose:
+      - "8080"
+    networks:
+      - flashsale-network
+
+  reverse-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile.nginx
+    container_name: flashsale-nginx
+    restart: unless-stopped
+    depends_on:
+      gateway-service:
+        condition: service_started
+    ports:
+      - "80:80"
+    networks:
+      - flashsale-network
+
+networks:
+  flashsale-network:
+    driver: bridge
+
+volumes:
+  db_data:
+  redis_data:

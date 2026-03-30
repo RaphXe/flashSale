@@ -19,7 +19,7 @@ import com.raph.stockbackend.repository.UserRepository;
 import com.raph.stockbackend.service.AuthService;
 
 @RestController
-@RequestMapping("/api/user")
+@RequestMapping("/api/internal/user")
 public class AuthController {
     @Autowired
     AuthService authService;
@@ -27,7 +27,7 @@ public class AuthController {
     @Autowired
     UserRepository userRepository;
 
-    @PostMapping("/internal/login")
+    @PostMapping("/login")
     public ResponseEntity<?> internalLogin(@RequestBody Map<String, String> credentials) {
         String username = credentials.get("username");
         String password = credentials.get("password");
@@ -52,10 +52,6 @@ public class AuthController {
         }
     }
 
-    @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody Map<String, String> credentials) {
-        return internalLogin(credentials);
-    }
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody User user) {

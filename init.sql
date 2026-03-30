@@ -11,27 +11,25 @@
  Target Server Version : 80037 (8.0.37)
  File Encoding         : 65001
 
- Date: 30/03/2026 14:47:43
+ Date: 30/03/2026 20:51:40
 */
 
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------
--- Table structure for inventory
+-- Table structure for goods
 -- ----------------------------
-DROP TABLE IF EXISTS `inventory`;
-CREATE TABLE `inventory`  (
+DROP TABLE IF EXISTS `goods`;
+CREATE TABLE `goods`  (
   `id` bigint NOT NULL AUTO_INCREMENT,
-  `product_id` bigint NOT NULL,
-  `total_stock` int NOT NULL,
-  `available_stock` int NOT NULL,
-  `locked_stock` int NOT NULL,
+  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `price` decimal(10, 2) NOT NULL,
+  `status` tinyint NOT NULL,
+  `create_time` datetime NOT NULL,
   `update_time` datetime NOT NULL,
-  `version` int NOT NULL,
-  PRIMARY KEY (`id`) USING BTREE,
-  INDEX `product_to_inventory`(`product_id` ASC) USING BTREE,
-  CONSTRAINT `product_to_inventory` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+  PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -57,21 +55,6 @@ CREATE TABLE `order`  (
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
--- Table structure for product
--- ----------------------------
-DROP TABLE IF EXISTS `product`;
-CREATE TABLE `product`  (
-  `id` bigint NOT NULL AUTO_INCREMENT,
-  `name` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `description` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `price` decimal(10, 2) NOT NULL,
-  `status` tinyint NOT NULL,
-  `create_time` datetime NOT NULL,
-  `update_time` datetime NOT NULL,
-  PRIMARY KEY (`id`) USING BTREE
-) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
-
--- ----------------------------
 -- Table structure for seckill_activity
 -- ----------------------------
 DROP TABLE IF EXISTS `seckill_activity`;
@@ -94,7 +77,7 @@ DROP TABLE IF EXISTS `seckill_goods`;
 CREATE TABLE `seckill_goods`  (
   `id` bigint NOT NULL,
   `activity_id` bigint NOT NULL,
-  `product_id` bigint NOT NULL,
+  `goods_id` bigint NOT NULL,
   `seckill_price` decimal(10, 2) NOT NULL,
   `seckill_stock` int NOT NULL,
   `available_stock` int NOT NULL,
@@ -106,9 +89,9 @@ CREATE TABLE `seckill_goods`  (
   `update_time` datetime NOT NULL,
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `seckill_goods_to_activity`(`activity_id` ASC) USING BTREE,
-  INDEX `seckill_goods_to_product`(`product_id` ASC) USING BTREE,
+  INDEX `seckill_goods_to_product`(`goods_id` ASC) USING BTREE,
   CONSTRAINT `seckill_goods_to_activity` FOREIGN KEY (`activity_id`) REFERENCES `seckill_activity` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `seckill_goods_to_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+  CONSTRAINT `seckill_goods_to_product` FOREIGN KEY (`goods_id`) REFERENCES `goods` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
@@ -119,7 +102,7 @@ CREATE TABLE `seckill_order`  (
   `id` bigint NOT NULL,
   `seckill_order_no` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `activity_id` bigint NOT NULL,
-  `product_id` bigint NOT NULL,
+  `goods_id` bigint NOT NULL,
   `user_id` bigint NOT NULL,
   `quantity` int NOT NULL,
   `seckill_price` decimal(10, 2) NOT NULL,
@@ -131,15 +114,32 @@ CREATE TABLE `seckill_order`  (
   `update_time` datetime NOT NULL,
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `unique_order_no`(`seckill_order_no` ASC) USING BTREE,
-  UNIQUE INDEX `unique_activity_user_product`(`activity_id` ASC, `product_id` ASC, `user_id` ASC) USING BTREE,
-  INDEX `fk_product`(`product_id` ASC) USING BTREE,
+  UNIQUE INDEX `unique_activity_user_product`(`activity_id` ASC, `goods_id` ASC, `user_id` ASC) USING BTREE,
+  INDEX `fk_product`(`goods_id` ASC) USING BTREE,
   INDEX `fk_user`(`user_id` ASC) USING BTREE,
   INDEX `fk_order_id`(`order_id` ASC) USING BTREE,
   CONSTRAINT `fk_activity` FOREIGN KEY (`activity_id`) REFERENCES `seckill_activity` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_order_id` FOREIGN KEY (`order_id`) REFERENCES `order` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
-  CONSTRAINT `fk_product` FOREIGN KEY (`product_id`) REFERENCES `product` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `fk_product` FOREIGN KEY (`goods_id`) REFERENCES `goods` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
   CONSTRAINT `fk_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for stock
+-- ----------------------------
+DROP TABLE IF EXISTS `stock`;
+CREATE TABLE `stock`  (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `goods_id` bigint NOT NULL,
+  `total_stock` int NOT NULL,
+  `available_stock` int NOT NULL,
+  `locked_stock` int NOT NULL,
+  `update_time` datetime NOT NULL,
+  `version` int NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `product_to_inventory`(`goods_id` ASC) USING BTREE,
+  CONSTRAINT `product_to_inventory` FOREIGN KEY (`goods_id`) REFERENCES `goods` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for users

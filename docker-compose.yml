@@ -8,7 +8,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
     volumes:
       - db_data:/var/lib/mysql
-      - ./user/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - flashsale-network
     healthcheck:
@@ -52,6 +52,26 @@ services:
     networks:
       - flashsale-network
 
+  goods-service:
+    build:
+      context: .
+      dockerfile: goods/Dockerfile
+    container_name: flashsale-goods
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-123456}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+    networks:
+      - flashsale-network
+
   gateway-service:
     build:
       context: .
@@ -61,9 +81,12 @@ services:
     depends_on:
       user-service:
         condition: service_started
+      goods-service:
+        condition: service_started
     environment:
       USER_SERVICE_BASE_URL: ${USER_SERVICE_BASE_URL:-http://user-service:8081}
-      JWT_SECRET: ${JWT_SECRET:-replace-this-with-at-least-32-bytes-secret-key-123456}
+      GOODS_SERVICE_BASE_URL: ${GOODS_SERVICE_BASE_URL:-http://goods-service:8082}
+      JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
     ports:
       - "${GATEWAY_HOST_PORT:-8080}:8080"

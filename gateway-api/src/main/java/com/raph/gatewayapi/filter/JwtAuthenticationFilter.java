@@ -38,13 +38,13 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
             return chain.filter(exchange);
         }
 
-        String path = exchange.getRequest().getURI().getPath();
+        String path = normalizePath(exchange.getRequest().getURI().getPath());
 
         if (OPEN_PATHS.contains(path)) {
             return chain.filter(exchange);
         }
 
-        if (path.startsWith("/api/user/internal/")) {
+        if (path.startsWith("/api/internal/")) {
             return writeError(exchange, HttpStatus.FORBIDDEN, "internal 接口不允许外部访问");
         }
 
@@ -73,6 +73,17 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
     @Override
     public int getOrder() {
         return -100;
+    }
+
+    private String normalizePath(String rawPath) {
+        if (rawPath == null || rawPath.isEmpty()) {
+            return "/";
+        }
+        int end = rawPath.length();
+        while (end > 1 && rawPath.charAt(end - 1) == '/') {
+            end--;
+        }
+        return rawPath.substring(0, end);
     }
 
     private Mono<Void> writeError(ServerWebExchange exchange, HttpStatus status, String message) {

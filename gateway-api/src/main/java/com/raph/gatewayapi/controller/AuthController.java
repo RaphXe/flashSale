@@ -35,7 +35,7 @@ public class AuthController {
     @PostMapping("/login")
     public Mono<ResponseEntity<Map<String, Object>>> login(@RequestBody Map<String, String> credentials) {
         return webClient.post()
-                .uri("/api/user/internal/login")
+                .uri("/api/internal/user/login")
                 .bodyValue(credentials)
                 .exchangeToMono(response -> response
                         .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
@@ -47,7 +47,7 @@ public class AuthController {
     @PostMapping("/register")
     public Mono<ResponseEntity<Map<String, Object>>> register(@RequestBody Map<String, Object> user) {
         return webClient.post()
-                .uri("/api/user/register")
+                .uri("/api/internal/user/register")
                 .bodyValue(user)
                 .exchangeToMono(response -> response
                         .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})

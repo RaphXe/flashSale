@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.raph.stock.dto.StockLockAdjustRequest;
 import com.raph.stock.entity.Stock;
 import com.raph.stock.service.StockService;
 
@@ -74,6 +75,20 @@ public class StockController {
             Map<String, String> response = new HashMap<>();
             response.put("message", ex.getMessage());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        }
+    }
+
+    @PostMapping("/adjust-lock")
+    public ResponseEntity<?> adjustLock(@RequestBody StockLockAdjustRequest request) {
+        try {
+            stockService.adjustLockStock(request == null ? null : request.getQuantityDeltaByGoods());
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "库存锁定调整成功");
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            Map<String, String> response = new HashMap<>();
+            response.put("message", ex.getMessage());
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
         }
     }
 }

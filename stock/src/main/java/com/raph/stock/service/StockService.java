@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.List;
 import java.util.Optional;
 
@@ -73,5 +74,43 @@ public class StockService {
             throw new IllegalArgumentException("库存不存在");
         }
         stockRepository.deleteById(id);
+    }
+
+    @Transactional
+    public void adjustLockStock(Map<Long, Integer> quantityDeltaByGoods) {
+        if (quantityDeltaByGoods == null || quantityDeltaByGoods.isEmpty()) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        for (Map.Entry<Long, Integer> entry : quantityDeltaByGoods.entrySet()) {
+            Long goodsId = entry.getKey();
+            Integer delta = entry.getValue();
+
+            if (goodsId == null || delta == null || delta == 0) {
+                continue;
+            }
+
+            Stock stock = stockRepository.findByGoodsIdForUpdate(goodsId)
+                    .orElseThrow(() -> new IllegalArgumentException("商品库存不存在, goodsId=" + goodsId));
+
+            if (delta > 0) {
+                if (stock.getAvailableStock() < delta) {
+                    throw new IllegalArgumentException("库存不足, goodsId=" + goodsId);
+                }
+                stock.setAvailableStock(stock.getAvailableStock() - delta);
+                stock.setLockedStock(stock.getLockedStock() + delta);
+            } else {
+                int release = -delta;
+                if (stock.getLockedStock() < release) {
+                    throw new IllegalArgumentException("锁定库存不足以释放, goodsId=" + goodsId);
+                }
+                stock.setAvailableStock(stock.getAvailableStock() + release);
+                stock.setLockedStock(stock.getLockedStock() - release);
+            }
+
+            stock.setUpdateTime(now);
+            stockRepository.save(stock);
+        }
     }
 }

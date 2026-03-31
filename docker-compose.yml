@@ -92,6 +92,27 @@ services:
     networks:
       - flashsale-network
 
+  order-service:
+    build:
+      context: .
+      dockerfile: order/Dockerfile
+    container_name: flashsale-order
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      DB_USER: ${DB_USER:-root}
+      DB_PASSWORD: ${DB_PASSWORD:-123456}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
+    networks:
+      - flashsale-network
+
   gateway-service:
     build:
       context: .
@@ -105,10 +126,13 @@ services:
         condition: service_started
       stock-service:
         condition: service_started
+      order-service:
+        condition: service_started
     environment:
       USER_SERVICE_BASE_URL: ${USER_SERVICE_BASE_URL:-http://user-service:8081}
       GOODS_SERVICE_BASE_URL: ${GOODS_SERVICE_BASE_URL:-http://goods-service:8082}
       STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
+      ORDER_SERVICE_BASE_URL: ${ORDER_SERVICE_BASE_URL:-http://order-service:8084}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
     ports:

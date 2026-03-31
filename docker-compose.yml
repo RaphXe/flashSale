@@ -109,6 +109,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
+      GOODS_SERVICE_BASE_URL: ${GOODS_SERVICE_BASE_URL:-http://goods-service:8082}
       STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
     networks:
       - flashsale-network

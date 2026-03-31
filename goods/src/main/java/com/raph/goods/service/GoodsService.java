@@ -1,15 +1,17 @@
 package com.raph.goods.service;
 
-import com.raph.goods.entity.Goods;
-import com.raph.goods.repository.GoodsRepository;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Optional;
+import com.raph.goods.entity.Goods;
+import com.raph.goods.repository.GoodsRepository;
 
 @Service
 public class GoodsService {
@@ -40,6 +42,13 @@ public class GoodsService {
 
     public Optional<Goods> findById(Long id) {
         return goodsRepository.findById(id);
+    }
+
+    public List<Goods> findByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return goodsRepository.findAllById(ids);
     }
 
     @Transactional

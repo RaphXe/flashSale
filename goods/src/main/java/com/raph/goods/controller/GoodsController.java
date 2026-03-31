@@ -51,6 +51,11 @@ public class GoodsController {
         return ResponseEntity.ok(goodsOptional.get());
     }
 
+    @PostMapping("/batch")
+    public ResponseEntity<List<Goods>> batchDetail(@RequestBody List<Long> ids) {
+        return ResponseEntity.ok(goodsService.findByIds(ids));
+    }
+
     @PostMapping
     public ResponseEntity<Goods> create(@RequestBody Goods goods) {
         Goods created = goodsService.create(goods);

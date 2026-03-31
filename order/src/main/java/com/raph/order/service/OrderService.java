@@ -9,18 +9,25 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
+import cn.hutool.core.lang.Snowflake;
+import cn.hutool.core.util.IdUtil;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.HttpStatusCodeException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import com.raph.order.dto.CreateOrderRequest;
+import com.raph.order.dto.GoodsDetailResponse;
 import com.raph.order.dto.OrderItemRequest;
 import com.raph.order.dto.StockLockAdjustRequest;
 import com.raph.order.dto.UpdateOrderRequest;
@@ -35,13 +42,20 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final RestTemplate restTemplate;
+    private final Snowflake snowflake;
+
+    @Value("${services.goods.base-url}")
+    private String goodsServiceBaseUrl;
 
     @Value("${services.stock.base-url}")
     private String stockServiceBaseUrl;
 
-    public OrderService(OrderRepository orderRepository) {
+    public OrderService(OrderRepository orderRepository,
+                        @Value("${snowflake.worker-id:1}") long workerId,
+                        @Value("${snowflake.datacenter-id:1}") long datacenterId) {
         this.orderRepository = orderRepository;
         this.restTemplate = new RestTemplate();
+        this.snowflake = IdUtil.getSnowflake(workerId, datacenterId);
     }
 
     public List<Order> queryOrders(Long userId) {
@@ -73,9 +87,10 @@ public class OrderService {
         }
 
         Map<Long, Integer> quantityByGoods = buildQuantityMapFromRequests(request.getItems());
+        Map<Long, BigDecimal> priceByGoods = loadGoodsPriceById(request.getItems());
         adjustStockWithDelta(quantityByGoods);
 
-        List<OrderItem> items = buildItems(request.getItems(), order, now);
+        List<OrderItem> items = buildItems(request.getItems(), order, now, priceByGoods);
         order.setItems(items);
         order.setAmount(calculateOrderAmount(items));
 
@@ -112,11 +127,12 @@ public class OrderService {
 
             Map<Long, Integer> oldQuantityByGoods = buildQuantityMapFromOrderItems(existing.getItems());
             Map<Long, Integer> newQuantityByGoods = buildQuantityMapFromRequests(request.getItems());
+            Map<Long, BigDecimal> priceByGoods = loadGoodsPriceById(request.getItems());
             Map<Long, Integer> quantityDeltaByGoods = buildQuantityDeltaMap(oldQuantityByGoods, newQuantityByGoods);
             adjustStockWithDelta(quantityDeltaByGoods);
 
             existing.getItems().clear();
-            List<OrderItem> newItems = buildItems(request.getItems(), existing, now);
+            List<OrderItem> newItems = buildItems(request.getItems(), existing, now, priceByGoods);
             existing.getItems().addAll(newItems);
             existing.setAmount(calculateOrderAmount(existing.getItems()));
         }
@@ -152,20 +168,25 @@ public class OrderService {
         }
     }
 
-    private List<OrderItem> buildItems(List<OrderItemRequest> itemRequests, Order order, LocalDateTime now) {
+    private List<OrderItem> buildItems(List<OrderItemRequest> itemRequests, Order order, LocalDateTime now,
+                                       Map<Long, BigDecimal> priceByGoods) {
         List<OrderItem> items = new ArrayList<>();
 
         for (OrderItemRequest itemRequest : itemRequests) {
             validateItem(itemRequest);
+            BigDecimal trustedPrice = priceByGoods.get(itemRequest.getGoodsId());
+            if (trustedPrice == null) {
+                throw new IllegalArgumentException("商品价格不存在，goodsId=" + itemRequest.getGoodsId());
+            }
 
-            BigDecimal itemAmount = itemRequest.getBuyPrice()
+            BigDecimal itemAmount = trustedPrice
                     .multiply(BigDecimal.valueOf(itemRequest.getQuantity()))
                     .setScale(2, RoundingMode.HALF_UP);
 
             OrderItem item = new OrderItem();
             item.setOrder(order);
             item.setGoodsId(itemRequest.getGoodsId());
-            item.setBuyPrice(itemRequest.getBuyPrice().setScale(2, RoundingMode.HALF_UP));
+            item.setBuyPrice(trustedPrice);
             item.setQuantity(itemRequest.getQuantity());
             item.setItemAmount(itemAmount);
             item.setActivityId(itemRequest.getActivityId());
@@ -184,9 +205,6 @@ public class OrderService {
         if (itemRequest.getGoodsId() == null) {
             throw new IllegalArgumentException("goodsId 不能为空");
         }
-        if (itemRequest.getBuyPrice() == null || itemRequest.getBuyPrice().compareTo(BigDecimal.ZERO) < 0) {
-            throw new IllegalArgumentException("buyPrice 不能为空且必须大于等于 0");
-        }
         if (itemRequest.getQuantity() == null || itemRequest.getQuantity() <= 0) {
             throw new IllegalArgumentException("quantity 必须大于 0");
         }
@@ -200,9 +218,61 @@ public class OrderService {
     }
 
     private long generateOrderId() {
-        long millis = System.currentTimeMillis();
-        long random = ThreadLocalRandom.current().nextLong(1000L, 9999L);
-        return millis * 10000 + random;
+        return snowflake.nextId();
+    }
+
+    private Map<Long, BigDecimal> loadGoodsPriceById(List<OrderItemRequest> itemRequests) {
+        Set<Long> goodsIds = itemRequests.stream()
+                .map(OrderItemRequest::getGoodsId)
+                .collect(Collectors.toSet());
+
+        String url = goodsServiceBaseUrl + "/api/goods/batch";
+        try {
+            ResponseEntity<List<GoodsDetailResponse>> response = restTemplate.exchange(
+                    url,
+                    HttpMethod.POST,
+                    new HttpEntity<>(new ArrayList<>(goodsIds)),
+                    new ParameterizedTypeReference<List<GoodsDetailResponse>>() {
+                    }
+            );
+
+            List<GoodsDetailResponse> goodsList = response.getBody();
+            if (!response.getStatusCode().is2xxSuccessful() || goodsList == null) {
+                throw new IllegalArgumentException("商品服务批量调用失败");
+            }
+
+            Set<Long> returnedGoodsIds = goodsList.stream()
+                    .map(GoodsDetailResponse::getId)
+                    .collect(Collectors.toSet());
+            for (Long goodsId : goodsIds) {
+                if (!returnedGoodsIds.contains(goodsId)) {
+                    throw new IllegalArgumentException("商品不存在，goodsId=" + goodsId);
+                }
+            }
+
+            Map<Long, BigDecimal> priceByGoods = new HashMap<>();
+            for (GoodsDetailResponse goods : goodsList) {
+                if (goods.getId() == null) {
+                    throw new IllegalArgumentException("商品数据非法: 缺少id");
+                }
+                if (goods.getStatus() == null || goods.getStatus() != 1) {
+                    throw new IllegalArgumentException("商品不可售，goodsId=" + goods.getId());
+                }
+                if (goods.getPrice() == null || goods.getPrice().compareTo(BigDecimal.ZERO) < 0) {
+                    throw new IllegalArgumentException("商品价格非法，goodsId=" + goods.getId());
+                }
+                priceByGoods.put(goods.getId(), goods.getPrice().setScale(2, RoundingMode.HALF_UP));
+            }
+            return priceByGoods;
+        } catch (HttpStatusCodeException ex) {
+            String body = ex.getResponseBodyAsString();
+            if (body != null && !body.isBlank()) {
+                throw new IllegalArgumentException("商品服务错误: " + body);
+            }
+            throw new IllegalArgumentException("商品服务错误: " + ex.getStatusCode());
+        } catch (RestClientException ex) {
+            throw new IllegalArgumentException("商品服务调用异常: " + ex.getMessage());
+        }
     }
 
     private String generateOrderNo(LocalDateTime now) {
@@ -231,8 +301,7 @@ public class OrderService {
         return quantityByGoods;
     }
 
-    private Map<Long, Integer> buildQuantityDeltaMap(Map<Long, Integer> oldQuantityByGoods,
-                                                     Map<Long, Integer> newQuantityByGoods) {
+    private Map<Long, Integer> buildQuantityDeltaMap(Map<Long, Integer> oldQuantityByGoods, Map<Long, Integer> newQuantityByGoods) {
         Map<Long, Integer> deltaMap = new HashMap<>();
 
         for (Map.Entry<Long, Integer> entry : oldQuantityByGoods.entrySet()) {
@@ -247,7 +316,7 @@ public class OrderService {
         return deltaMap;
     }
 
-    // delta > 0 表示扣减可用库存并增加锁定库存，delta < 0 表示释放锁定库存并增加可用库存
+    // 调用stock服务接口调整库存锁定，delta > 0 表示扣减可用库存并增加锁定库存，delta < 0 表示释放锁定库存并增加可用库存
     private void adjustStockWithDelta(Map<Long, Integer> quantityDeltaByGoods) {
         if (quantityDeltaByGoods == null || quantityDeltaByGoods.isEmpty()) {
             return;
@@ -268,7 +337,7 @@ public class OrderService {
                 throw new IllegalArgumentException("库存服务错误: " + body);
             }
             throw new IllegalArgumentException("库存服务错误: " + ex.getStatusCode());
-        } catch (Exception ex) {
+        } catch (RestClientException ex) {
             throw new IllegalArgumentException("库存服务调用异常: " + ex.getMessage());
         }
     }

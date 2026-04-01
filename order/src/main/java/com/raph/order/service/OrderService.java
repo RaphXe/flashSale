@@ -13,8 +13,6 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
-import cn.hutool.core.lang.Snowflake;
-import cn.hutool.core.util.IdUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
@@ -34,6 +32,9 @@ import com.raph.order.dto.UpdateOrderRequest;
 import com.raph.order.entity.Order;
 import com.raph.order.entity.OrderItem;
 import com.raph.order.repository.OrderRepository;
+
+import cn.hutool.core.lang.Snowflake;
+import cn.hutool.core.util.IdUtil;
 
 @Service
 public class OrderService {
@@ -87,7 +88,9 @@ public class OrderService {
         }
 
         Map<Long, Integer> quantityByGoods = buildQuantityMapFromRequests(request.getItems());
+        // 从goods服务中获取价格信息并校验商品状态，构建一个以goodsId为key，price为value的Map，会抛出illegalArgumentException
         Map<Long, BigDecimal> priceByGoods = loadGoodsPriceById(request.getItems());
+        // 向stock服务接口调用调整库存锁定，扣减可用库存并增加锁定库存，如果接口调用失败会抛出异常导致订单创建失败，事务回滚，避免订单和库存数据不一致
         adjustStockWithDelta(quantityByGoods);
 
         List<OrderItem> items = buildItems(request.getItems(), order, now, priceByGoods);
@@ -168,12 +171,14 @@ public class OrderService {
         }
     }
 
+    // 根据订单请求中的明细项列表构建订单明细实体列表，过程中会校验每个明细项的合法性，并使用从goods服务获取的价格信息计算每个明细项的金额
     private List<OrderItem> buildItems(List<OrderItemRequest> itemRequests, Order order, LocalDateTime now,
                                        Map<Long, BigDecimal> priceByGoods) {
         List<OrderItem> items = new ArrayList<>();
 
         for (OrderItemRequest itemRequest : itemRequests) {
             validateItem(itemRequest);
+            // 从goods服务获取的价格信息是可信的，不能使用订单请求中传过来的价格信息进行计算，以防止恶意篡改价格导致金额计算错误
             BigDecimal trustedPrice = priceByGoods.get(itemRequest.getGoodsId());
             if (trustedPrice == null) {
                 throw new IllegalArgumentException("商品价格不存在，goodsId=" + itemRequest.getGoodsId());
@@ -197,7 +202,7 @@ public class OrderService {
 
         return items;
     }
-
+    
     private void validateItem(OrderItemRequest itemRequest) {
         if (itemRequest == null) {
             throw new IllegalArgumentException("订单明细项不能为空");
@@ -209,7 +214,7 @@ public class OrderService {
             throw new IllegalArgumentException("quantity 必须大于 0");
         }
     }
-
+    
     private BigDecimal calculateOrderAmount(List<OrderItem> items) {
         return items.stream()
                 .map(OrderItem::getItemAmount)
@@ -221,11 +226,13 @@ public class OrderService {
         return snowflake.nextId();
     }
 
+    // 根据全段传输的商品ID列表批量调用goods服务接口获取价格和状态等信息，并进行校验，返回一个以goodsId为key，price为value的Map
     private Map<Long, BigDecimal> loadGoodsPriceById(List<OrderItemRequest> itemRequests) {
         Set<Long> goodsIds = itemRequests.stream()
                 .map(OrderItemRequest::getGoodsId)
                 .collect(Collectors.toSet());
 
+        // 调用goods服务接口批量获取商品信息，接口设计为POST /api/goods/batch，参数为商品ID列表，返回值为商品信息列表
         String url = goodsServiceBaseUrl + "/api/goods/batch";
         try {
             ResponseEntity<List<GoodsDetailResponse>> response = restTemplate.exchange(
@@ -244,12 +251,14 @@ public class OrderService {
             Set<Long> returnedGoodsIds = goodsList.stream()
                     .map(GoodsDetailResponse::getId)
                     .collect(Collectors.toSet());
+            // 校验前端传入的商品ID列表  
             for (Long goodsId : goodsIds) {
                 if (!returnedGoodsIds.contains(goodsId)) {
                     throw new IllegalArgumentException("商品不存在，goodsId=" + goodsId);
                 }
             }
 
+            // 进一步校验商品细节
             Map<Long, BigDecimal> priceByGoods = new HashMap<>();
             for (GoodsDetailResponse goods : goodsList) {
                 if (goods.getId() == null) {

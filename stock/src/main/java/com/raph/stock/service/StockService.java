@@ -91,6 +91,7 @@ public class StockService {
                 continue;
             }
 
+            // 悲观锁
             Stock stock = stockRepository.findByGoodsIdForUpdate(goodsId)
                     .orElseThrow(() -> new IllegalArgumentException("商品库存不存在, goodsId=" + goodsId));
 

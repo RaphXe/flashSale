@@ -725,6 +725,269 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "Seckill (JWT Required)",
+      "item": [
+        {
+          "name": "List Seckill Activities",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/seckill/activity",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "seckill",
+                "activity"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Seckill Activity (Save activityId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let data = {};",
+                  "try { data = pm.response.json(); } catch (e) {}",
+                  "",
+                  "if (pm.response.code === 201 && data.id) {",
+                  "  pm.collectionVariables.set('seckillActivityId', String(data.id));",
+                  "  console.log('Seckill activity ID saved to collection variable: seckillActivityId');",
+                  "}",
+                  "",
+                  "pm.test('Create seckill activity succeeded', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([201]);",
+                  "  pm.expect(data.id).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"限时秒杀活动\",\n  \"startTime\": \"2026-04-01T10:00:00\",\n  \"endTime\": \"2026-04-01T23:59:00\",\n  \"status\": 1,\n  \"limitPerPerson\": 1,\n  \"seckillGoods\": [\n    {\n      \"goodsId\": {{goodsId}},\n      \"seckillPrice\": 49.90,\n      \"seckillStock\": 20,\n      \"availableStock\": 20,\n      \"lockStock\": 0,\n      \"perUserLimit\": 1,\n      \"status\": 1\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/seckill/activity",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "seckill",
+                "activity"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Update Seckill Activity (Off Shelf)",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"限时秒杀活动\",\n  \"startTime\": \"2026-04-01T10:00:00\",\n  \"endTime\": \"2026-04-01T23:59:00\",\n  \"status\": 2,\n  \"limitPerPerson\": 1\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/seckill/activity/{{seckillActivityId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "seckill",
+                "activity",
+                "{{seckillActivityId}}"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Seckill Goods",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/seckill/goods?activityId={{seckillActivityId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "seckill",
+                "goods"
+              ],
+              "query": [
+                {
+                  "key": "activityId",
+                  "value": "{{seckillActivityId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Create Seckill Order (Save seckillOrderId)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "let data = {};",
+                  "try { data = pm.response.json(); } catch (e) {}",
+                  "",
+                  "if (pm.response.code === 201 && data.id) {",
+                  "  pm.collectionVariables.set('seckillOrderId', String(data.id));",
+                  "  console.log('Seckill order ID saved to collection variable: seckillOrderId');",
+                  "}",
+                  "",
+                  "pm.test('Create seckill order succeeded', function () {",
+                  "  pm.expect(pm.response.code).to.be.oneOf([201]);",
+                  "  pm.expect(data.id).to.exist;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"activityId\": {{seckillActivityId}},\n  \"goodsId\": {{goodsId}},\n  \"userId\": {{userId}},\n  \"quantity\": 1,\n  \"seckillPrice\": 49.90,\n  \"status\": 0\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/seckill/order",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "seckill",
+                "order"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List Seckill Orders By User",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/seckill/order?userId={{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "seckill",
+                "order"
+              ],
+              "query": [
+                {
+                  "key": "userId",
+                  "value": "{{userId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "variable": [
@@ -758,6 +1021,14 @@
     },
     {
       "key": "orderId",
+      "value": ""
+    },
+    {
+      "key": "seckillActivityId",
+      "value": ""
+    },
+    {
+      "key": "seckillOrderId",
       "value": ""
     }
   ]

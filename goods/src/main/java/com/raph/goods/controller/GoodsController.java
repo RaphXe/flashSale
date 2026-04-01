@@ -2,6 +2,9 @@ package com.raph.goods.controller;
 
 import com.raph.goods.entity.Goods;
 import com.raph.goods.service.GoodsService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -24,6 +27,8 @@ import java.util.Optional;
 @RequestMapping("/api/goods")
 public class GoodsController {
 
+    private static final Logger log = LoggerFactory.getLogger(GoodsController.class);
+
     private final GoodsService goodsService;
 
     public GoodsController(GoodsService goodsService) {
@@ -42,18 +47,39 @@ public class GoodsController {
 
     @GetMapping("/{id}")
     public ResponseEntity<?> detail(@PathVariable Long id) {
-        Optional<Goods> goodsOptional = goodsService.findById(id);
-        if (goodsOptional.isEmpty()) {
-            Map<String, String> response = new HashMap<>();
-            response.put("message", "商品不存在");
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        // MDC记录数据访问详情，便于后续开展热点数据分析
+        MDC.put("event", "goods_detail_access");
+        MDC.put("goodsId", String.valueOf(id));
+        try {
+            Optional<Goods> goodsOptional = goodsService.findById(id);
+            if (goodsOptional.isEmpty()) {
+                MDC.put("hit", "false");
+                log.info("获取商品详情，商品不存在");
+                Map<String, String> response = new HashMap<>();
+                response.put("message", "商品不存在");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+            }
+            MDC.put("hit", "true");
+            log.info("获取商品详情成功");
+            return ResponseEntity.ok(goodsOptional.get());
+        } finally {
+            MDC.clear();
         }
-        return ResponseEntity.ok(goodsOptional.get());
     }
 
     @PostMapping("/batch")
     public ResponseEntity<List<Goods>> batchDetail(@RequestBody List<Long> ids) {
-        return ResponseEntity.ok(goodsService.findByIds(ids));
+        
+        MDC.put("event", "goods_batch_detail_access");
+        MDC.put("idsCount", String.valueOf(ids == null ? 0 : ids.size()));
+        try {
+            List<Goods> result = goodsService.findByIds(ids);
+            MDC.put("resultCount", String.valueOf(result.size()));
+            log.info("批量获取商品详情成功");
+            return ResponseEntity.ok(result);
+        } finally {
+            MDC.clear();
+        }
     }
 
     @PostMapping

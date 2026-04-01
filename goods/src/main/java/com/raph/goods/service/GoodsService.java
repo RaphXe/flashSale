@@ -93,7 +93,7 @@ public class GoodsService {
 
         // 先查缓存
         String cacheKey = buildDetailCacheKey(id);
-        Goods cachedGoods = goodsRedisTemplate.opsForValue().get(cacheKey);
+        Goods cachedGoods = readDetailCacheSafely(cacheKey);
         if (cachedGoods != null) {
             return Optional.of(cachedGoods);
         }
@@ -105,7 +105,7 @@ public class GoodsService {
             boolean acquired = lock.tryLock();
             if (acquired) {
                 // 二次验证缓存，防止击穿
-                cachedGoods = goodsRedisTemplate.opsForValue().get(cacheKey);
+                cachedGoods = readDetailCacheSafely(cacheKey);
                 if (cachedGoods != null) {
                     return Optional.of(cachedGoods);
                 }
@@ -121,7 +121,7 @@ public class GoodsService {
                 // 获取锁失败，可能是热点数据被大量访问，短暂等待后重试
                 Thread.sleep(50);
                 // 可能已经有其他线程加载了缓存，直接读取缓存
-                return Optional.ofNullable(goodsRedisTemplate.opsForValue().get(cacheKey));
+                return Optional.ofNullable(readDetailCacheSafely(cacheKey));
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -205,14 +205,26 @@ public class GoodsService {
         if (goods.getId() == null) {
             return;
         }
+        // 引入随机过期时间，防止缓存雪崩
+        long randomSeconds = (long) (Math.random() * 60);
         goodsRedisTemplate.opsForValue().set(
                 buildDetailCacheKey(goods.getId()),
                 goods,
-                Duration.ofSeconds(detailCacheTtlSeconds)
+                Duration.ofSeconds(detailCacheTtlSeconds + randomSeconds)
         );
     }
 
     private void deleteDetailCache(Long id) {
         goodsRedisTemplate.delete(buildDetailCacheKey(id));
+    }
+
+    private Goods readDetailCacheSafely(String cacheKey) {
+        try {
+            return goodsRedisTemplate.opsForValue().get(cacheKey);
+        } catch (ClassCastException ex) {
+            // 兼容历史缓存中非 Goods 类型数据，删除后回源数据库重建缓存
+            goodsRedisTemplate.delete(cacheKey);
+            return null;
+        }
     }
 }

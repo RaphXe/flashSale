@@ -32,6 +32,19 @@ services:
       timeout: 5s
       retries: 5
 
+  fluent-bit:
+    image: fluent/fluent-bit:2.2
+    container_name: flashsale-fluent-bit
+    restart: unless-stopped
+    volumes:
+      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    networks:
+      - flashsale-network
+
   user-service:
     build:
       context: .
@@ -58,6 +71,9 @@ services:
       dockerfile: goods/Dockerfile
     container_name: flashsale-goods
     restart: unless-stopped
+    labels:
+      service: goods-service
+      project: flashsale
     depends_on:
       db:
         condition: service_healthy
@@ -72,6 +88,19 @@ services:
       GOODS_CACHE_TTL_SECONDS: ${GOODS_CACHE_TTL_SECONDS:-300}
       GOODS_BLOOM_EXPECTED_INSERTIONS: ${GOODS_BLOOM_EXPECTED_INSERTIONS:-100000}
       GOODS_BLOOM_FPP: ${GOODS_BLOOM_FPP:-0.01}
+    logging:
+      driver: fluentd
+      options:
+        fluentd-address: ${FLUENTD_ADDRESS:-127.0.0.1:24224}
+        tag: docker.goods-service
+        fluentd-async: "true"
+        labels: "service,project"
+    healthcheck:
+      test: [ "CMD", "wget", "-q", "-O", "-", "http://localhost:8082/api/goods" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     networks:
       - flashsale-network
 
@@ -150,7 +179,7 @@ services:
       user-service:
         condition: service_started
       goods-service:
-        condition: service_started
+        condition: service_healthy
       stock-service:
         condition: service_started
       order-service:
@@ -165,6 +194,7 @@ services:
       SECKILL_SERVICE_BASE_URL: ${SECKILL_SERVICE_BASE_URL:-http://seckill-service:8085}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      JAVA_TOOL_OPTIONS: ${GATEWAY_JAVA_TOOL_OPTIONS:--Dnetworkaddress.cache.ttl=30 -Dnetworkaddress.cache.negative.ttl=0}
     ports:
       - "${GATEWAY_HOST_PORT:-8080}:8080"
     expose:

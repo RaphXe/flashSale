@@ -1,16 +1,20 @@
 package com.raph.goods.repository;
 
-import com.raph.goods.entity.Goods;
+import java.math.BigDecimal;
+import java.util.List;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.math.BigDecimal;
-import java.util.List;
+import com.raph.goods.entity.Goods;
 
 @Repository
 public interface GoodsRepository extends JpaRepository<Goods, Long> {
+
+    @Query("SELECT g.id FROM Goods g")
+    List<Long> findAllIds();
 
     List<Goods> findByStatus(Integer status);
 

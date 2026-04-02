@@ -1,7 +1,11 @@
 package com.raph.goods.controller;
 
-import com.raph.goods.entity.Goods;
-import com.raph.goods.service.GoodsService;
+import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -17,11 +21,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.math.BigDecimal;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import com.raph.goods.entity.Goods;
+import com.raph.goods.service.GoodsService;
 
 @RestController
 @RequestMapping("/api/goods")
@@ -55,6 +56,7 @@ public class GoodsController {
             if (goodsOptional.isEmpty()) {
                 MDC.put("hit", "false");
                 log.info("获取商品详情，商品不存在");
+                
                 Map<String, String> response = new HashMap<>();
                 response.put("message", "商品不存在");
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);

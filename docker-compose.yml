@@ -36,6 +36,9 @@ services:
     image: fluent/fluent-bit:2.2
     container_name: flashsale-fluent-bit
     restart: unless-stopped
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
     volumes:
       - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
@@ -44,6 +47,24 @@ services:
       - "24224:24224/udp"
     networks:
       - flashsale-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: flashsale-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+    ports:
+      - "9200:9200"
+    networks:
+      - flashsale-network
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:9200/_cluster/health" ]
+      interval: 10s
+      timeout: 10s
+      retries: 20
 
   user-service:
     build:
@@ -79,15 +100,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
     environment:
       DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
       GOODS_CACHE_TTL_SECONDS: ${GOODS_CACHE_TTL_SECONDS:-300}
       GOODS_BLOOM_EXPECTED_INSERTIONS: ${GOODS_BLOOM_EXPECTED_INSERTIONS:-100000}
       GOODS_BLOOM_FPP: ${GOODS_BLOOM_FPP:-0.01}
+      GOODS_CACHE_WARMUP_ENABLED: ${GOODS_CACHE_WARMUP_ENABLED:-true}
+      GOODS_WARMUP_ES_INDEX_PATTERN: ${GOODS_WARMUP_ES_INDEX_PATTERN:-goods-service-*}
+      GOODS_WARMUP_MAX_COUNT: ${GOODS_WARMUP_MAX_COUNT:-1000}
+      GOODS_WARMUP_RATIO: ${GOODS_WARMUP_RATIO:-0.2}
     logging:
       driver: fluentd
       options:

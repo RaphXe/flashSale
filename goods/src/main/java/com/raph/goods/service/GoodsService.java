@@ -5,8 +5,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
@@ -140,6 +142,22 @@ public class GoodsService {
             return Collections.emptyList();
         }
         return goodsRepository.findAllById(ids);
+    }
+
+    public int warmupDetailCache(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return 0;
+        }
+
+        Set<Long> uniqueIds = new LinkedHashSet<>(ids);
+        List<Goods> goodsList = goodsRepository.findAllById(uniqueIds);
+        int warmedCount = 0;
+        for (Goods goods : goodsList) {
+            writeDetailCache(goods);
+            putIdIntoBloomFilter(goods.getId());
+            warmedCount++;
+        }
+        return warmedCount;
     }
 
     @Transactional

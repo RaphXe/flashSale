@@ -95,6 +95,7 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
         );
     }
 
+    // 提取唯一商品数量，作为预热规模的参考
     private long extractUniqueGoodsCount(SearchResponse<Void> response) {
         Aggregate uniqueAgg = response.aggregations().get("unique_goods_count");
         if (uniqueAgg == null || !uniqueAgg.isCardinality()) {
@@ -103,6 +104,7 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
         return uniqueAgg.cardinality().value();
     }
 
+    // 提取按访问频次排序的商品ID列表
     private List<Long> extractOrderedGoodsIds(SearchResponse<Void> response) {
         List<Long> ids = new ArrayList<>();
         Aggregate termsAgg = response.aggregations().get("goods_ids");
@@ -125,6 +127,7 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
         return ids;
     }
 
+    // 根据唯一商品数量和可用ID数量，计算本次预热的目标ID数量
     private int calculateWarmupTarget(long uniqueGoodsCount, int availableIdsSize) {
         int cappedMaxCount = Math.max(1, warmupMaxCount);
         long nonNegativeUniqueCount = Math.max(0L, uniqueGoodsCount);

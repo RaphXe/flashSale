@@ -1,0 +1,81 @@
+datadir="/var/lib/proxysql"
+
+admin_variables=
+{
+  admin_credentials="admin:admin"
+  mysql_ifaces="0.0.0.0:6032"
+}
+
+mysql_variables=
+{
+  threads=4
+  max_connections=2048
+  interfaces="0.0.0.0:6033"
+  monitor_username="root"
+  monitor_password="123456"
+  default_query_delay=0
+  default_query_timeout=36000000
+  have_compress=true
+  poll_timeout=2000
+}
+
+mysql_servers =
+(
+  {
+    address="db"
+    port=3306
+    hostgroup=10
+    max_connections=200
+  },
+  {
+    address="db-replica"
+    port=3306
+    hostgroup=20
+    max_connections=200
+  }
+)
+
+mysql_users =
+(
+  {
+    username = "root"
+    password = "123456"
+    default_hostgroup = 10
+    active = 1
+    transaction_persistent = 1
+  }
+)
+
+mysql_replication_hostgroups=
+(
+  {
+    writer_hostgroup=10
+    reader_hostgroup=20
+    comment="flashsale-rw-split"
+  }
+)
+
+mysql_query_rules=
+(
+  {
+    rule_id=10
+    active=1
+    match_digest="^SELECT[[:space:]]+.*FOR[[:space:]]+UPDATE"
+    destination_hostgroup=10
+    apply=1
+  },
+  {
+    rule_id=20
+    active=1
+    match_digest="^SELECT"
+    destination_hostgroup=20
+    apply=1
+  },
+  {
+    rule_id=30
+    active=1
+    match_digest="^(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP|TRUNCATE|LOAD|CALL|DO|SET|START|BEGIN|COMMIT|ROLLBACK)"
+    destination_hostgroup=10
+    apply=1
+  }
+)

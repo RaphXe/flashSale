@@ -3,12 +3,21 @@ services:
     image: mysql:8.0
     container_name: flashsale-db
     restart: unless-stopped
+    command:
+      - --server-id=1
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-stock_database}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_REPLICATION_USER: ${MYSQL_REPLICATION_USER:-repl}
+      MYSQL_REPLICATION_PASSWORD: ${MYSQL_REPLICATION_PASSWORD:-repl_123456}
     volumes:
       - db_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+      - ./mysql/master-init/01-create-replication-user.sh:/docker-entrypoint-initdb.d/01-create-replication-user.sh:ro
     networks:
       - flashsale-network
     healthcheck:
@@ -16,6 +25,55 @@ services:
       interval: 10s
       timeout: 10s
       retries: 10
+
+  db-replica:
+    image: mysql:8.0
+    container_name: flashsale-db-replica
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    command:
+      - --server-id=2
+      - --relay-log=mysql-relay-bin
+      - --read-only=ON
+      - --super-read-only=ON
+      - --log-bin=mysql-bin
+      - --binlog-format=ROW
+      - --gtid-mode=ON
+      - --enforce-gtid-consistency=ON
+      - --log-replica-updates=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_REPLICATION_USER: ${MYSQL_REPLICATION_USER:-repl}
+      MYSQL_REPLICATION_PASSWORD: ${MYSQL_REPLICATION_PASSWORD:-repl_123456}
+    volumes:
+      - db_replica_data:/var/lib/mysql
+      - ./mysql/replica-init/01-configure-replica.sh:/docker-entrypoint-initdb.d/01-configure-replica.sh:ro
+    networks:
+      - flashsale-network
+    healthcheck:
+      test: [ "CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  proxysql:
+    image: proxysql/proxysql:2.7.2
+    container_name: flashsale-proxysql
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      db-replica:
+        condition: service_healthy
+    volumes:
+      - ./proxysql/proxysql.cnf:/etc/proxysql.cnf:ro
+    ports:
+      - "6033:6033"
+      - "6032:6032"
+    networks:
+      - flashsale-network
 
   redis:
     image: redis:7-alpine
@@ -73,12 +131,12 @@ services:
     container_name: flashsale-user
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      proxysql:
+        condition: service_started
       redis:
         condition: service_healthy
     environment:
-      DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      DB_URL: ${DB_URL:-jdbc:mysql://proxysql:6033/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
@@ -96,14 +154,14 @@ services:
       service: goods-service
       project: flashsale
     depends_on:
-      db:
-        condition: service_healthy
+      proxysql:
+        condition: service_started
       redis:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
     environment:
-      DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      DB_URL: ${DB_URL:-jdbc:mysql://proxysql:6033/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
@@ -139,12 +197,12 @@ services:
     container_name: flashsale-stock
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      proxysql:
+        condition: service_started
       redis:
         condition: service_healthy
     environment:
-      DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      DB_URL: ${DB_URL:-jdbc:mysql://proxysql:6033/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
@@ -159,12 +217,12 @@ services:
     container_name: flashsale-order
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      proxysql:
+        condition: service_started
       redis:
         condition: service_healthy
     environment:
-      DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      DB_URL: ${DB_URL:-jdbc:mysql://proxysql:6033/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
@@ -181,14 +239,14 @@ services:
     container_name: flashsale-seckill
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      proxysql:
+        condition: service_started
       redis:
         condition: service_healthy
       stock-service:
         condition: service_started
     environment:
-      DB_URL: ${DB_URL:-jdbc:mysql://db:3306/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      DB_URL: ${DB_URL:-jdbc:mysql://proxysql:6033/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
@@ -250,4 +308,5 @@ networks:
 
 volumes:
   db_data:
+  db_replica_data:
   redis_data:

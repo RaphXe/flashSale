@@ -144,6 +144,7 @@ public class GoodsService {
         return goodsRepository.findAllById(ids);
     }
 
+    // 预热缓存
     public int warmupDetailCache(List<Long> ids) {
         if (ids == null || ids.isEmpty()) {
             return 0;

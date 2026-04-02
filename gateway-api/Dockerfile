@@ -4,6 +4,9 @@ WORKDIR /build
 
 COPY pom.xml ./
 COPY gateway-api/pom.xml gateway-api/pom.xml
+
+RUN mvn -B -DskipTests -f gateway-api/pom.xml dependency:go-offline
+
 COPY gateway-api/src gateway-api/src
 
 RUN mvn -B -DskipTests -f gateway-api/pom.xml clean package

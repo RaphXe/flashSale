@@ -46,6 +46,18 @@ public class GoodsController {
         return ResponseEntity.ok(goodsService.queryGoods(status, keyword, minPrice, maxPrice));
     }
 
+    // 使用es进行关键词搜索
+    @GetMapping("/search")
+    public ResponseEntity<List<Goods>> search(@RequestParam String keyword) {
+        try {
+            List<Goods> result = goodsService.searchByKeyword(keyword);
+            log.info("关键词搜索完成");
+            return ResponseEntity.ok(result);
+        } finally {
+            MDC.clear();
+        }
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<?> detail(@PathVariable Long id) {
         // MDC记录数据访问详情，便于后续开展热点数据分析

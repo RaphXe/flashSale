@@ -116,6 +116,8 @@ services:
       ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
     ports:
       - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
     networks:
       - flashsale-network
     healthcheck:
@@ -167,6 +169,7 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       ELASTICSEARCH_URL: ${ELASTICSEARCH_URL:-http://elasticsearch:9200}
+      GOODS_SEARCH_ES_BOOTSTRAP_ENABLED: ${GOODS_SEARCH_ES_BOOTSTRAP_ENABLED:-true}
       GOODS_CACHE_TTL_SECONDS: ${GOODS_CACHE_TTL_SECONDS:-300}
       GOODS_BLOOM_EXPECTED_INSERTIONS: ${GOODS_BLOOM_EXPECTED_INSERTIONS:-100000}
       GOODS_BLOOM_FPP: ${GOODS_BLOOM_FPP:-0.01}
@@ -310,3 +313,4 @@ volumes:
   db_data:
   db_replica_data:
   redis_data:
+  elasticsearch_data:

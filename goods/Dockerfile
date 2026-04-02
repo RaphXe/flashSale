@@ -4,6 +4,9 @@ WORKDIR /build
 
 COPY pom.xml ./
 COPY goods/pom.xml goods/pom.xml
+
+RUN mvn -B -DskipTests -f goods/pom.xml dependency:go-offline
+
 COPY goods/src goods/src
 
 RUN mvn -B -DskipTests -f goods/pom.xml clean package

@@ -20,6 +20,8 @@ public interface GoodsRepository extends JpaRepository<Goods, Long> {
 
     List<Goods> findByNameContaining(String keyword);
 
+    List<Goods> findByNameContainingOrDescriptionContaining(String nameKeyword, String descriptionKeyword);
+
     @Query("SELECT g FROM Goods g WHERE g.status = :status ORDER BY g.updateTime DESC")
     List<Goods> findAllByStatusOrderByUpdateTimeDesc(@Param("status") Integer status);
 

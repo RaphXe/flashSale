@@ -1,15 +1,10 @@
 package com.raph.goods.service;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.SortOrder;
-import co.elastic.clients.elasticsearch._types.aggregations.Aggregate;
-import co.elastic.clients.elasticsearch._types.aggregations.StringTermsBucket;
-import co.elastic.clients.elasticsearch.core.SearchRequest;
-import co.elastic.clients.elasticsearch.core.SearchResponse;
-import co.elastic.clients.util.NamedValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,6 +13,14 @@ import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import co.elastic.clients.elasticsearch.ElasticsearchClient;
+import co.elastic.clients.elasticsearch._types.SortOrder;
+import co.elastic.clients.elasticsearch._types.aggregations.Aggregate;
+import co.elastic.clients.elasticsearch._types.aggregations.StringTermsBucket;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.SearchResponse;
+import co.elastic.clients.util.NamedValue;
+
 @Component
 public class GoodsCacheWarmupRunner implements ApplicationRunner {
 
@@ -25,6 +28,7 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
 
     private final GoodsService goodsService;
     private final ElasticsearchClient elasticsearchClient;
+    private final boolean esBootstrapEnabled;
     private final boolean warmupEnabled;
     private final String esIndexPattern;
     private final int warmupMaxCount;
@@ -33,6 +37,7 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
     public GoodsCacheWarmupRunner(
             GoodsService goodsService,
             ElasticsearchClient elasticsearchClient,
+            @Value("${goods.search.es.bootstrap-enabled:true}") boolean esBootstrapEnabled,
             @Value("${goods.cache.warmup.enabled:true}") boolean warmupEnabled,
             @Value("${goods.cache.warmup.es-index-pattern:goods-service-*}") String esIndexPattern,
             @Value("${goods.cache.warmup.max-count:1000}") int warmupMaxCount,
@@ -40,6 +45,7 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
     ) {
         this.goodsService = goodsService;
         this.elasticsearchClient = elasticsearchClient;
+        this.esBootstrapEnabled = esBootstrapEnabled;
         this.warmupEnabled = warmupEnabled;
         this.esIndexPattern = esIndexPattern;
         this.warmupMaxCount = warmupMaxCount;
@@ -48,6 +54,8 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
+        bootstrapGoodsSearchIndex();
+
         if (!warmupEnabled) {
             log.info("商品缓存预热已关闭");
             return;
@@ -66,19 +74,54 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
         }
     }
 
+    private void bootstrapGoodsSearchIndex() {
+        if (!esBootstrapEnabled) {
+            log.info("商品搜索ES全量初始化已关闭");
+            return;
+        }
+        try {
+            int syncedCount = goodsService.syncAllFromMysqlToElasticsearch();
+            log.info("商品搜索ES全量初始化完成，同步数量={}", syncedCount);
+        } catch (Exception ex) {
+            log.warn("商品搜索ES全量初始化失败，跳过本次初始化: {}", ex.getMessage());
+        }
+    }
+
     // 使用ES加载热点商品ID
     private List<Long> loadHotGoodsIdsFromEs() throws Exception {
         SearchRequest request = buildSearchRequest();
         SearchResponse<Void> response = elasticsearchClient.search(request, Void.class);
 
+        // 根据ES聚合结果，计算预热目标数量
         long uniqueGoodsCount = extractUniqueGoodsCount(response);
-        List<Long> orderedIds = extractOrderedGoodsIds(response);
-        if (orderedIds.isEmpty()) {
-            return orderedIds;
+        long totalGoodsCount = goodsService.countAllGoods();
+        int warmupTarget = calculateWarmupTarget(uniqueGoodsCount, totalGoodsCount);
+        if (warmupTarget <= 0) {
+            return List.of();
         }
 
-        int warmupTarget = calculateWarmupTarget(uniqueGoodsCount, orderedIds.size());
-        return orderedIds.subList(0, warmupTarget);
+        // 选取需要预热的候选商品
+        Set<Long> candidateIds = new LinkedHashSet<>(extractOrderedGoodsIds(response));
+        if (candidateIds.size() < warmupTarget) {
+            List<Long> allGoodsIds = goodsService.findAllGoodsIds();
+            for (Long id : allGoodsIds) {
+                if (id == null) {
+                    continue;
+                }
+                candidateIds.add(id);
+                if (candidateIds.size() >= warmupTarget) {
+                    break;
+                }
+            }
+        }
+
+        if (candidateIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> orderedCandidates = new ArrayList<>(candidateIds);
+        int endIndex = Math.min(warmupTarget, orderedCandidates.size());
+        return new ArrayList<>(orderedCandidates.subList(0, endIndex));
     }
 
     private SearchRequest buildSearchRequest() {
@@ -127,16 +170,19 @@ public class GoodsCacheWarmupRunner implements ApplicationRunner {
         return ids;
     }
 
-    // 根据唯一商品数量和可用ID数量，计算本次预热的目标ID数量
-    private int calculateWarmupTarget(long uniqueGoodsCount, int availableIdsSize) {
+    // 根据热点商品规模与总商品规模，计算本次预热目标数量
+    private int calculateWarmupTarget(long uniqueGoodsCount, long totalGoodsCount) {
         int cappedMaxCount = Math.max(1, warmupMaxCount);
         long nonNegativeUniqueCount = Math.max(0L, uniqueGoodsCount);
+        long nonNegativeTotalCount = Math.max(0L, totalGoodsCount);
         double effectiveRatio = warmupRatio <= 0 ? 0.2 : warmupRatio;
+        long baseCount = Math.max(nonNegativeUniqueCount, nonNegativeTotalCount);
+        if (baseCount <= 0) {
+            return 0;
+        }
 
-        int ratioCount = (int) Math.ceil(nonNegativeUniqueCount * effectiveRatio);
+        int ratioCount = (int) Math.ceil(baseCount * effectiveRatio);
         ratioCount = Math.max(1, ratioCount);
-
-        int target = Math.min(ratioCount, cappedMaxCount);
-        return Math.min(target, availableIdsSize);
+        return Math.min(ratioCount, cappedMaxCount);
     }
 }

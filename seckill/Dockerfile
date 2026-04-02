@@ -4,6 +4,9 @@ WORKDIR /build
 
 COPY pom.xml ./
 COPY seckill/pom.xml seckill/pom.xml
+
+RUN mvn -B -DskipTests -f seckill/pom.xml dependency:go-offline
+
 COPY seckill/src seckill/src
 
 RUN mvn -B -DskipTests -f seckill/pom.xml clean package

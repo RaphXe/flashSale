@@ -14,6 +14,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       MYSQL_REPLICATION_USER: ${MYSQL_REPLICATION_USER:-repl}
       MYSQL_REPLICATION_PASSWORD: ${MYSQL_REPLICATION_PASSWORD:-repl_123456}
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - db_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
@@ -47,6 +48,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       MYSQL_REPLICATION_USER: ${MYSQL_REPLICATION_USER:-repl}
       MYSQL_REPLICATION_PASSWORD: ${MYSQL_REPLICATION_PASSWORD:-repl_123456}
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - db_replica_data:/var/lib/mysql
       - ./mysql/replica-init/01-configure-replica.sh:/docker-entrypoint-initdb.d/01-configure-replica.sh:ro
@@ -67,6 +69,8 @@ services:
         condition: service_healthy
       db-replica:
         condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./proxysql/proxysql.cnf:/etc/proxysql.cnf:ro
     ports:
@@ -80,6 +84,8 @@ services:
     container_name: flashsale-redis
     restart: unless-stopped
     command: [ "redis-server", "--appendonly", "yes" ]
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - redis_data:/data
     networks:
@@ -90,6 +96,51 @@ services:
       timeout: 5s
       retries: 5
 
+  kafka:
+    image: apache/kafka:3.7.1
+    container_name: flashsale-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "9092:9092"
+    networks:
+      - flashsale-network
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: flashsale-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - flashsale-network
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
   fluent-bit:
     image: fluent/fluent-bit:2.2
     container_name: flashsale-fluent-bit
@@ -97,6 +148,8 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
     volumes:
       - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
       - ./fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
@@ -114,6 +167,7 @@ services:
       discovery.type: single-node
       xpack.security.enabled: "false"
       ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "9200:9200"
     volumes:
@@ -143,6 +197,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
+      TZ: ${TZ:-Asia/Shanghai}
     networks:
       - flashsale-network
 
@@ -177,6 +232,7 @@ services:
       GOODS_WARMUP_ES_INDEX_PATTERN: ${GOODS_WARMUP_ES_INDEX_PATTERN:-goods-service-*}
       GOODS_WARMUP_MAX_COUNT: ${GOODS_WARMUP_MAX_COUNT:-1000}
       GOODS_WARMUP_RATIO: ${GOODS_WARMUP_RATIO:-0.2}
+      TZ: ${TZ:-Asia/Shanghai}
     logging:
       driver: fluentd
       options:
@@ -210,6 +266,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
+      TZ: ${TZ:-Asia/Shanghai}
     networks:
       - flashsale-network
 
@@ -232,6 +289,7 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       GOODS_SERVICE_BASE_URL: ${GOODS_SERVICE_BASE_URL:-http://goods-service:8082}
       STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
+      TZ: ${TZ:-Asia/Shanghai}
     networks:
       - flashsale-network
 
@@ -246,6 +304,10 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
       stock-service:
         condition: service_started
     environment:
@@ -254,6 +316,13 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      TZ: ${TZ:-Asia/Shanghai}
+      JAVA_TOOL_OPTIONS: ${SECKILL_JAVA_TOOL_OPTIONS:--Duser.timezone=Asia/Shanghai}
       STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
     networks:
       - flashsale-network
@@ -284,6 +353,7 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
       JAVA_TOOL_OPTIONS: ${GATEWAY_JAVA_TOOL_OPTIONS:--Dnetworkaddress.cache.ttl=30 -Dnetworkaddress.cache.negative.ttl=0}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "${GATEWAY_HOST_PORT:-8080}:8080"
     expose:
@@ -300,6 +370,8 @@ services:
     depends_on:
       gateway-service:
         condition: service_started
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "80:80"
     networks:

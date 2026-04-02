@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.raph.seckill.dto.CreateSeckillOrderRequest;
 import com.raph.seckill.dto.UpdateSeckillOrderRequest;
 import com.raph.seckill.entity.SeckillOrder;
+import com.raph.seckill.service.SeckillOrderAsyncService;
 import com.raph.seckill.service.SeckillOrderService;
 
 @RestController
@@ -27,9 +28,12 @@ import com.raph.seckill.service.SeckillOrderService;
 public class SeckillOrderController {
 
     private final SeckillOrderService seckillOrderService;
+    private final SeckillOrderAsyncService seckillOrderAsyncService;
 
-    public SeckillOrderController(SeckillOrderService seckillOrderService) {
+    public SeckillOrderController(SeckillOrderService seckillOrderService,
+                                  SeckillOrderAsyncService seckillOrderAsyncService) {
         this.seckillOrderService = seckillOrderService;
+        this.seckillOrderAsyncService = seckillOrderAsyncService;
     }
 
     @GetMapping
@@ -50,10 +54,26 @@ public class SeckillOrderController {
         return ResponseEntity.ok(orderOptional.get());
     }
 
+    @GetMapping("/no/{seckillOrderNo}")
+    public ResponseEntity<?> detailByOrderNo(@PathVariable String seckillOrderNo) {
+        Optional<SeckillOrder> orderOptional = seckillOrderService.findByOrderNo(seckillOrderNo);
+        if (orderOptional.isEmpty()) {
+            return errorResponse(HttpStatus.NOT_FOUND, "秒杀订单不存在");
+        }
+        return ResponseEntity.ok(orderOptional.get());
+    }
+
     @PostMapping
     public ResponseEntity<?> create(@RequestBody CreateSeckillOrderRequest request) {
         try {
-            return ResponseEntity.status(HttpStatus.CREATED).body(seckillOrderService.create(request));
+            // 异步创建订单，委托给kafka消费者处理，快速响应请求，提升用户体验
+            String orderNo = seckillOrderAsyncService.submitCreateOrder(request);
+            Map<String, String> response = new HashMap<>();
+            // 立即响应订单已受理
+            response.put("message", "下单请求已受理，正在排队处理");
+            // 同步返回订单号，前端可以据此轮询订单状态
+            response.put("seckillOrderNo", orderNo);
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
         } catch (IllegalArgumentException ex) {
             return errorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
         }

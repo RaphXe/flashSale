@@ -16,6 +16,9 @@ import jakarta.persistence.LockModeType;
 @Repository
 public interface SeckillGoodsRepository extends JpaRepository<SeckillGoods, Long> {
 
+    @Query("SELECT g.id FROM SeckillGoods g")
+    List<Long> findAllIds();
+
     List<SeckillGoods> findByActivityId(Long activityId);
 
     List<SeckillGoods> findByActivityIdOrderByUpdateTimeDesc(Long activityId);

@@ -87,7 +87,7 @@ public class SeckillActivityService {
                 if (goods.getAvailableStock() == null) {
                     goods.setAvailableStock(goods.getSeckillStock());
                 }
-                // For @Version entities, null marks a new row; setting 0 here can be treated as detached.
+                // 不能将有version注解的字段设置为0，否则会导致数据库认为是更新而不是插入，抛出异常
                 goods.setVersion(null);
                 goods.setCreateTime(now);
                 goods.setUpdateTime(now);
@@ -129,6 +129,14 @@ public class SeckillActivityService {
 
         releaseUnsoldStockBackToStockService(id);
         seckillActivityRepository.deleteById(id);
+    }
+
+    @Transactional
+    public void settleActivityStock(Long activityId) {
+        if (activityId == null) {
+            throw new IllegalArgumentException("activityId 不能为空");
+        }
+        releaseUnsoldStockBackToStockService(activityId);
     }
 
     private void validateActivity(SeckillActivity payload) {
@@ -215,9 +223,11 @@ public class SeckillActivityService {
                 continue;
             }
 
+            // 计算要释放回 stock-service 的库存增量
             releaseDeltaByGoods.merge(goods.getGoodsId(), -unsold, Integer::sum);
             goods.setAvailableStock(0);
-            int seckillStock = goods.getSeckillStock() == null ? 0 : goods.getSeckillStock();
+            Integer seckillStockValue = goods.getSeckillStock();
+            int seckillStock = seckillStockValue == null ? 0 : seckillStockValue;
             goods.setSeckillStock(Math.max(0, seckillStock - unsold));
             goods.setUpdateTime(now);
         }

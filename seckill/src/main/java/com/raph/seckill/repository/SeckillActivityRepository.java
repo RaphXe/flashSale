@@ -19,4 +19,9 @@ public interface SeckillActivityRepository extends JpaRepository<SeckillActivity
 
     @Query("SELECT a FROM SeckillActivity a WHERE a.startTime <= :now AND a.endTime >= :now ORDER BY a.startTime ASC")
     List<SeckillActivity> findCurrentActivities(@Param("now") LocalDateTime now);
+
+    @Query("SELECT a FROM SeckillActivity a WHERE a.startTime >= :fromTime AND a.startTime <= :toTime ORDER BY a.startTime ASC")
+    List<SeckillActivity> findByStartTimeBetweenOrderByStartTimeAsc(
+            @Param("fromTime") LocalDateTime fromTime,
+            @Param("toTime") LocalDateTime toTime);
 }

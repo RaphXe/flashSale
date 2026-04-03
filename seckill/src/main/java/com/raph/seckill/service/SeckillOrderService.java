@@ -3,6 +3,7 @@ package com.raph.seckill.service;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
@@ -14,6 +15,7 @@ import org.springframework.util.StringUtils;
 
 import com.raph.seckill.dto.CreateSeckillOrderRequest;
 import com.raph.seckill.dto.UpdateSeckillOrderRequest;
+import com.raph.seckill.entity.SeckillActivity;
 import com.raph.seckill.entity.SeckillGoods;
 import com.raph.seckill.entity.SeckillOrder;
 import com.raph.seckill.repository.SeckillOrderRepository;
@@ -26,18 +28,23 @@ public class SeckillOrderService {
 
     private static final DateTimeFormatter ORDER_NO_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
     private static final int ORDER_STATUS_PENDING = 0;
+    private static final int ORDER_STATUS_CREATED = 1;
     private static final int ORDER_STATUS_TIMEOUT = 2;
+    private static final int ORDER_STATUS_CANCELED = 3;
 
     private final SeckillOrderRepository seckillOrderRepository;
     private final SeckillGoodsService seckillGoodsService;
+    private final SeckillActivityService seckillActivityService;
     private final Snowflake snowflake;
 
     public SeckillOrderService(SeckillOrderRepository seckillOrderRepository,
                                SeckillGoodsService seckillGoodsService,
+                               SeckillActivityService seckillActivityService,
                                @Value("${snowflake.worker-id:1}") long workerId,
                                @Value("${snowflake.datacenter-id:1}") long datacenterId) {
         this.seckillOrderRepository = seckillOrderRepository;
         this.seckillGoodsService = seckillGoodsService;
+        this.seckillActivityService = seckillActivityService;
         this.snowflake = IdUtil.getSnowflake(workerId, datacenterId);
     }
 
@@ -88,9 +95,18 @@ public class SeckillOrderService {
     public SeckillOrder createSync(CreateSeckillOrderRequest request, String predefinedOrderNo) {
         validateCreateRequest(request);
 
+        // 先校验活动是否可下单，避免在无效活动上锁库存
+        SeckillActivity activity = validateAndGetActiveActivity(request.getActivityId());
+
         SeckillGoods seckillGoods = seckillGoodsService
                 .findByActivityIdAndGoodsIdForUpdate(request.getActivityId(), request.getGoodsId())
                 .orElseThrow(() -> new IllegalArgumentException("秒杀商品不存在"));
+
+        // 下单价格必须与秒杀商品当前价格一致
+        validateOrderPrice(request, seckillGoods);
+
+        // 校验活动限购：同一用户在同一活动下累计下单数量不能超过 limitPerPerson
+        validateActivityLimit(activity, request);
 
         validateAndLockSeckillGoodsStock(seckillGoods, request.getQuantity());
 
@@ -126,6 +142,8 @@ public class SeckillOrderService {
         return seckillOrderRepository.save(order);
     }
 
+
+    // 若订单到期，则关闭订单并释放锁定的库存
     @Transactional
     public boolean expireOrderIfPending(String seckillOrderNo) {
         if (!StringUtils.hasText(seckillOrderNo)) {
@@ -150,6 +168,7 @@ public class SeckillOrderService {
                 .findByActivityIdAndGoodsIdForUpdate(order.getActivityId(), order.getGoodsId())
                 .orElseThrow(() -> new IllegalArgumentException("秒杀商品不存在"));
 
+        // 释放锁定库存        
         releaseLockedSeckillGoodsStock(seckillGoods, order.getQuantity());
         seckillGoods.setUpdateTime(LocalDateTime.now());
         seckillGoodsService.saveAndRefreshCache(seckillGoods);
@@ -158,6 +177,44 @@ public class SeckillOrderService {
         order.setUpdateTime(LocalDateTime.now());
         seckillOrderRepository.save(order);
         return true;
+    }
+
+    // 活动结算时，强制取消仍处于待支付状态的秒杀订单，并释放锁定库存。
+    @Transactional
+    public int forceCancelPendingOrdersByActivity(Long activityId) {
+        if (activityId == null) {
+            return 0;
+        }
+
+        List<SeckillOrder> pendingOrders = seckillOrderRepository
+                .findByActivityIdAndStatusOrderByCreateTimeDesc(activityId, ORDER_STATUS_PENDING);
+        int affected = 0;
+        for (SeckillOrder pendingOrder : pendingOrders) {
+            if (pendingOrder == null || !StringUtils.hasText(pendingOrder.getSeckillOrderNo())) {
+                continue;
+            }
+
+            SeckillOrder order = seckillOrderRepository
+                    .findBySeckillOrderNoForUpdate(pendingOrder.getSeckillOrderNo())
+                    .orElse(null);
+            if (order == null || order.getStatus() == null || order.getStatus() != ORDER_STATUS_PENDING) {
+                continue;
+            }
+
+            SeckillGoods seckillGoods = seckillGoodsService
+                    .findByActivityIdAndGoodsIdForUpdate(order.getActivityId(), order.getGoodsId())
+                    .orElseThrow(() -> new IllegalArgumentException("秒杀商品不存在"));
+
+            releaseLockedSeckillGoodsStock(seckillGoods, order.getQuantity());
+            seckillGoods.setUpdateTime(LocalDateTime.now());
+            seckillGoodsService.saveAndRefreshCache(seckillGoods);
+
+            order.setStatus(ORDER_STATUS_CANCELED);
+            order.setUpdateTime(LocalDateTime.now());
+            seckillOrderRepository.save(order);
+            affected++;
+        }
+        return affected;
     }
 
     public void validateCreateRequestPayload(CreateSeckillOrderRequest request) {
@@ -220,6 +277,52 @@ public class SeckillOrderService {
         }
     }
 
+    private SeckillActivity validateAndGetActiveActivity(Long activityId) {
+        SeckillActivity activity = seckillActivityService.findById(activityId)
+                .orElseThrow(() -> new IllegalArgumentException("秒杀活动不存在"));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        // 仅验证时间，避免状态切换延时
+        if (activity.getStartTime() == null || activity.getEndTime() == null
+                || now.isBefore(activity.getStartTime()) || now.isAfter(activity.getEndTime())) {
+            throw new IllegalArgumentException("当前不在秒杀活动时间范围内");
+        }
+        return activity;
+    }
+
+    private void validateOrderPrice(CreateSeckillOrderRequest request, SeckillGoods seckillGoods) {
+        if (seckillGoods.getSeckillPrice() == null) {
+            throw new IllegalArgumentException("秒杀商品价格未配置");
+        }
+
+        if (request.getSeckillPrice().setScale(2, RoundingMode.HALF_UP)
+                .compareTo(seckillGoods.getSeckillPrice().setScale(2, RoundingMode.HALF_UP)) != 0) {
+            throw new IllegalArgumentException("秒杀价格已变更，请刷新后重试");
+        }
+    }
+
+    private void validateActivityLimit(SeckillActivity activity, CreateSeckillOrderRequest request) {
+        Integer limitPerPerson = activity.getLimitPerPerson();
+        if (limitPerPerson == null) {
+            return;
+        }
+
+        long alreadyOrdered = seckillOrderRepository.findByActivityIdOrderByCreateTimeDesc(request.getActivityId())
+                .stream()
+                .filter(order -> request.getUserId().equals(order.getUserId()))
+                .filter(order -> Arrays.asList(ORDER_STATUS_PENDING, ORDER_STATUS_CREATED).contains(order.getStatus()))
+            .mapToLong(order -> {
+                Integer quantity = order.getQuantity();
+                return quantity == null ? 0L : quantity.longValue();
+            }).sum();
+
+        long total = alreadyOrdered + request.getQuantity();
+        if (total > limitPerPerson) {
+            throw new IllegalArgumentException("超过活动限购数量");
+        }
+    }
+
     private void validateAndLockSeckillGoodsStock(SeckillGoods seckillGoods, Integer quantity) {
         if (seckillGoods.getStatus() == null || seckillGoods.getStatus() != 1) {
             throw new IllegalArgumentException("秒杀商品未上架或活动未开始");
@@ -228,7 +331,8 @@ public class SeckillOrderService {
             throw new IllegalArgumentException("秒杀库存不足");
         }
 
-        int lockStock = seckillGoods.getLockStock() == null ? 0 : seckillGoods.getLockStock();
+        Integer lockStockValue = seckillGoods.getLockStock();
+        int lockStock = lockStockValue == null ? 0 : lockStockValue;
         seckillGoods.setAvailableStock(seckillGoods.getAvailableStock() - quantity);
         seckillGoods.setLockStock(lockStock + quantity);
     }
@@ -239,12 +343,14 @@ public class SeckillOrderService {
             throw new IllegalArgumentException("释放库存数量非法");
         }
 
-        int lockStock = seckillGoods.getLockStock() == null ? 0 : seckillGoods.getLockStock();
+        Integer lockStockValue = seckillGoods.getLockStock();
+        int lockStock = lockStockValue == null ? 0 : lockStockValue;
         if (lockStock < release) {
             throw new IllegalArgumentException("锁定库存不足，无法释放");
         }
 
-        int availableStock = seckillGoods.getAvailableStock() == null ? 0 : seckillGoods.getAvailableStock();
+        Integer availableStockValue = seckillGoods.getAvailableStock();
+        int availableStock = availableStockValue == null ? 0 : availableStockValue;
         seckillGoods.setLockStock(lockStock - release);
         seckillGoods.setAvailableStock(availableStock + release);
     }

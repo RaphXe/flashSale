@@ -44,7 +44,7 @@ public class SeckillOrder {
     @Column(name = "amount", nullable = false, precision = 10, scale = 2)
     private BigDecimal amount;
 
-    // 0: 待创建普通订单, 1: 已创建普通订单, 2: 已超时, 3: 已取消
+    // 0: 未支付 1: 已支付 2: 已取消 3: 已过期
     @Column(name = "status", nullable = false)
     private Integer status;
 

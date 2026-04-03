@@ -37,15 +37,15 @@ services:
     command:
       - --server-id=2
       - --relay-log=mysql-relay-bin
-      - --read-only=ON
-      - --super-read-only=ON
       - --log-bin=mysql-bin
       - --binlog-format=ROW
       - --gtid-mode=ON
       - --enforce-gtid-consistency=ON
       - --log-replica-updates=ON
+      - --read-only=ON
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST:-%}
       MYSQL_REPLICATION_USER: ${MYSQL_REPLICATION_USER:-repl}
       MYSQL_REPLICATION_PASSWORD: ${MYSQL_REPLICATION_PASSWORD:-repl_123456}
       TZ: ${TZ:-Asia/Shanghai}

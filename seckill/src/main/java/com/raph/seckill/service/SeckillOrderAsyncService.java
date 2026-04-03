@@ -1,7 +1,6 @@
 package com.raph.seckill.service;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -109,6 +108,7 @@ public class SeckillOrderAsyncService {
         try {
             SeckillOrder createdOrder = seckillOrderService.createSync(toRequest(message), orderNo);
             publishTimeoutMessageOnce(createdOrder);
+            // 订单创建成功，记录到缓存中
             stringRedisTemplate.opsForValue().set(
                     idempotentKey,
                     "DONE",
@@ -119,6 +119,7 @@ public class SeckillOrderAsyncService {
             if (shouldRecoverByExistingOrder(ex)) {
                 seckillOrderService.findByOrderNo(orderNo).ifPresent(this::publishTimeoutMessageOnce);
             }
+            // 订单创建失败，记录到缓存中，避免重复消费导致死循环
             stringRedisTemplate.opsForValue().set(
                     idempotentKey,
                     "REJECTED",
@@ -133,6 +134,7 @@ public class SeckillOrderAsyncService {
         }
     }
 
+    // RabbitMQ消费者，处理订单超时消息，关闭过期订单
     @RabbitListener(queues = "${seckill.order.timeout.queue:seckill.order.timeout.queue}")
     public void consumeOrderTimeout(SeckillOrderTimeoutMessage message) {
         String orderNo = message == null ? null : message.getSeckillOrderNo();
@@ -142,6 +144,7 @@ public class SeckillOrderAsyncService {
         }
 
         String idempotentKey = buildTimeoutConsumeIdempotentKey(orderNo);
+        // 尝试获取锁，防止重复消费导致重复处理
         Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
                 idempotentKey,
                 "PROCESSING",
@@ -153,7 +156,9 @@ public class SeckillOrderAsyncService {
         }
 
         try {
+            // 关闭订单
             boolean expired = seckillOrderService.expireOrderIfPending(orderNo);
+            // 更新redis
             stringRedisTemplate.opsForValue().set(
                     idempotentKey,
                     expired ? "DONE" : "SKIPPED",
@@ -210,12 +215,14 @@ public class SeckillOrderAsyncService {
         return request;
     }
 
+    // 使用RabbitMQ，发送延时消息，关闭超时订单
     private void publishTimeoutMessageOnce(SeckillOrder order) {
         if (order == null || !StringUtils.hasText(order.getSeckillOrderNo())) {
             return;
         }
 
         String sentKey = buildTimeoutMessageSentKey(order.getSeckillOrderNo());
+        // 获取分布式锁，确保同一订单只发送一次超时消息
         Boolean firstPublish = stringRedisTemplate.opsForValue().setIfAbsent(
                 sentKey,
                 "SENT",

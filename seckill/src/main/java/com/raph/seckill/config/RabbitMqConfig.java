@@ -26,6 +26,14 @@ public class RabbitMqConfig {
     public static final String ORDER_TIMEOUT_QUEUE = "seckill.order.timeout.queue";
     public static final String ORDER_TIMEOUT_ROUTING_KEY = "seckill.order.timeout";
 
+    public static final String ACTIVITY_TASK_TTL_EXCHANGE = "seckill.activity.task.ttl.exchange";
+    public static final String ACTIVITY_TASK_TTL_QUEUE = "seckill.activity.task.ttl.queue";
+    public static final String ACTIVITY_TASK_TTL_ROUTING_KEY = "seckill.activity.task.ttl";
+
+    public static final String ACTIVITY_TASK_TRIGGER_EXCHANGE = "seckill.activity.task.trigger.exchange";
+    public static final String ACTIVITY_TASK_TRIGGER_QUEUE = "seckill.activity.task.trigger.queue";
+    public static final String ACTIVITY_TASK_TRIGGER_ROUTING_KEY = "seckill.activity.task.trigger";
+
     @Bean
     public DirectExchange orderTtlExchange() {
         return new DirectExchange(ORDER_TTL_EXCHANGE, true, false);
@@ -34,6 +42,16 @@ public class RabbitMqConfig {
     @Bean
     public DirectExchange orderTimeoutExchange() {
         return new DirectExchange(ORDER_TIMEOUT_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public DirectExchange activityTaskTtlExchange() {
+        return new DirectExchange(ACTIVITY_TASK_TTL_EXCHANGE, true, false);
+    }
+
+    @Bean
+    public DirectExchange activityTaskTriggerExchange() {
+        return new DirectExchange(ACTIVITY_TASK_TRIGGER_EXCHANGE, true, false);
     }
 
     @Bean
@@ -50,6 +68,19 @@ public class RabbitMqConfig {
     }
 
     @Bean
+    public Queue activityTaskTtlQueue() {
+        Map<String, Object> args = new HashMap<>();
+        args.put("x-dead-letter-exchange", ACTIVITY_TASK_TRIGGER_EXCHANGE);
+        args.put("x-dead-letter-routing-key", ACTIVITY_TASK_TRIGGER_ROUTING_KEY);
+        return QueueBuilder.durable(ACTIVITY_TASK_TTL_QUEUE).withArguments(args).build();
+    }
+
+    @Bean
+    public Queue activityTaskTriggerQueue() {
+        return QueueBuilder.durable(ACTIVITY_TASK_TRIGGER_QUEUE).build();
+    }
+
+    @Bean
     public Binding bindOrderTtlQueue() {
         return BindingBuilder.bind(orderTtlQueue()).to(orderTtlExchange()).with(ORDER_TTL_ROUTING_KEY);
     }
@@ -57,6 +88,16 @@ public class RabbitMqConfig {
     @Bean
     public Binding bindOrderTimeoutQueue() {
         return BindingBuilder.bind(orderTimeoutQueue()).to(orderTimeoutExchange()).with(ORDER_TIMEOUT_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding bindActivityTaskTtlQueue() {
+        return BindingBuilder.bind(activityTaskTtlQueue()).to(activityTaskTtlExchange()).with(ACTIVITY_TASK_TTL_ROUTING_KEY);
+    }
+
+    @Bean
+    public Binding bindActivityTaskTriggerQueue() {
+        return BindingBuilder.bind(activityTaskTriggerQueue()).to(activityTaskTriggerExchange()).with(ACTIVITY_TASK_TRIGGER_ROUTING_KEY);
     }
 
     @Bean

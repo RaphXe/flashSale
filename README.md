@@ -51,8 +51,8 @@
 - 使用 Guava BloomFilter 预判商品是否可能存在，减少无效 DB 查询（防缓存穿透）。
 - 查询回源时配合 Redisson 分布式锁，避免并发下的缓存击穿。
 - 启动阶段支持两件事：
-  - MySQL 全量同步到 Elasticsearch（可开关）
-  - 基于 ES 聚合热点商品进行缓存预热（可配置比例和上限）
+  - MySQL 全量同步到 Elasticsearch
+  - 基于 ES 聚合热点商品进行缓存预热
 
 ## 2.3 秒杀服务（Kafka + RabbitMQ + Redis 幂等）
 
@@ -64,18 +64,18 @@
 - 超时消费者同样做 Redis 幂等控制，避免重复关闭。
 - 同时使用布隆过滤、缓存与 Redisson，管理秒杀商品详情读取场景。
 
-## 2.4 日志链路（Logback JSON + Fluent Bit + Elasticsearch）
+## 2.4 缓存预热（Logback JSON + Fluent Bit + Elasticsearch）
 
 实现位置：`goods/logback-spring.xml`、`fluent-bit/fluent-bit.conf`
 
 - 商品服务引入 `logstash-logback-encoder` 输出结构化日志。
 - Docker 日志通过 fluentd driver 进入 Fluent Bit。
-- Fluent Bit 对日志进行解析后，一份输出到 stdout，一份写入 Elasticsearch 索引，便于检索和分析。
+- Fluent Bit 对日志进行解析后，写入 Elasticsearch 索引，便于检索和分析。
 
 ## 2.5 数据层与基础能力
 
 - MySQL 8 + JPA/JDBC 负责核心业务数据。
-- MySQL 主从复制 + ProxySQL 支撑读写分离实验。
+- MySQL 主从复制 + ProxySQL 支撑读写分离。
 - Redis 除了缓存，还承担幂等状态、锁辅助等职责。
 - 订单号生成采用雪花算法参数（workerId/datacenterId 可配置）。
 
@@ -142,5 +142,6 @@ npm install
 npm run dev
 ```
 
+## TODO: 将活动时间校验放在进入kafka队列之前、创建seckillActivity的一致性校验。
 
-## TODO: 验证RabbitMQ、验证sekillorder的订单明细、创建seckillActivity的一致性校验。
+现在我想要实现秒杀活动的定时开启与关闭。请你帮我实现：1、创建数据库轮询任务，每分钟轮询查看未来1小时内是否有即将开启的活动，若有则将计划写入redis（保证幂等性）和rabbitMQ 2、活动开始前5分钟，将活动和活动中的商品预热到redis中3、活动结束后20分钟，结算活动的库存，并将剩余库存释放到stock服务中，之所以是20分钟，因为订单超时时间为15分钟。也就是说20分钟后，所有订单都应该结算完毕，此时没有待释放的订单，如果你对此条内容有所疑问，可以暂不执行。4、活动状态不参与订单校验（避免延时），校验仅由时间确定，此条我已经实现

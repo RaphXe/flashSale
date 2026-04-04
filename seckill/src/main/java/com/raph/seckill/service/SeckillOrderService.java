@@ -95,11 +95,11 @@ public class SeckillOrderService {
     public SeckillOrder createSync(CreateSeckillOrderRequest request, String predefinedOrderNo) {
         validateCreateRequest(request);
 
-        // 先校验活动是否可下单，避免在无效活动上锁库存
+        // 校验活动是否可下单
         SeckillActivity activity = validateAndGetActiveActivity(request.getActivityId());
 
         SeckillGoods seckillGoods = seckillGoodsService
-                .findByActivityIdAndGoodsIdForUpdate(request.getActivityId(), request.getGoodsId())
+                .findByActivityIdAndGoodsId(request.getActivityId(), request.getGoodsId())
                 .orElseThrow(() -> new IllegalArgumentException("秒杀商品不存在"));
 
         // 下单价格必须与秒杀商品当前价格一致
@@ -108,39 +108,16 @@ public class SeckillOrderService {
         // 校验活动限购：同一用户在同一活动下累计下单数量不能超过 limitPerPerson
         validateActivityLimit(activity, request);
 
-        // 锁定库存前后都在订单创建链路里兜底，避免异常导致库存遗留。
+        // 锁定库存
         seckillGoodsService.lockStockForOrder(request.getActivityId(), request.getGoodsId(), request.getQuantity());
-
-        LocalDateTime now = LocalDateTime.now();
+        
         try {
-            // 同一用户在同一活动同一商品上只能有一个订单
-            seckillOrderRepository.findByActivityIdAndGoodsIdAndUserId(request.getActivityId(), request.getGoodsId(), request.getUserId())
-                    .ifPresent(existing -> {
-                        throw new IllegalArgumentException("该用户已存在同活动同商品的秒杀订单");
-                    });
-
-            SeckillOrder order = new SeckillOrder();
-            order.setId(generateId());
-            order.setSeckillOrderNo(StringUtils.hasText(predefinedOrderNo)
-                ? predefinedOrderNo.trim()
-                : generateOrderNo(now));
-            order.setActivityId(request.getActivityId());
-            order.setGoodsId(request.getGoodsId());
-            order.setUserId(request.getUserId());
-            order.setQuantity(request.getQuantity());
-            order.setSeckillPrice(request.getSeckillPrice().setScale(2, RoundingMode.HALF_UP));
-            order.setAmount(request.getSeckillPrice()
-                    .multiply(java.math.BigDecimal.valueOf(request.getQuantity()))
-                    .setScale(2, RoundingMode.HALF_UP));
-            order.setStatus(defaultIfNull(request.getStatus(), ORDER_STATUS_PENDING));
-            order.setOrderId(null);
-            order.setExpireTime(request.getExpireTime() == null ? now.plusMinutes(15) : request.getExpireTime());
-            order.setCreateTime(now);
-            order.setUpdateTime(now);
+            SeckillOrder order = buildOrderForCreate(request, predefinedOrderNo);
 
             return seckillOrderRepository.save(order);
         } catch (RuntimeException ex) {
             try {
+                // 创建订单失败，回滚锁定库存
                 seckillGoodsService.releaseLockedStockForOrder(request.getActivityId(), request.getGoodsId(), request.getQuantity());
             } catch (RuntimeException rollbackEx) {
                 ex.addSuppressed(rollbackEx);
@@ -319,6 +296,29 @@ public class SeckillOrderService {
 
     private Integer defaultIfNull(Integer value, Integer defaultValue) {
         return value == null ? defaultValue : value;
+    }
+
+    private SeckillOrder buildOrderForCreate(CreateSeckillOrderRequest request, String predefinedOrderNo) {
+        LocalDateTime now = LocalDateTime.now();
+        SeckillOrder order = new SeckillOrder();
+        order.setId(generateId());
+        order.setSeckillOrderNo(StringUtils.hasText(predefinedOrderNo)
+                ? predefinedOrderNo.trim()
+                : generateOrderNo(now));
+        order.setActivityId(request.getActivityId());
+        order.setGoodsId(request.getGoodsId());
+        order.setUserId(request.getUserId());
+        order.setQuantity(request.getQuantity());
+        order.setSeckillPrice(request.getSeckillPrice().setScale(2, RoundingMode.HALF_UP));
+        order.setAmount(request.getSeckillPrice()
+                .multiply(java.math.BigDecimal.valueOf(request.getQuantity()))
+                .setScale(2, RoundingMode.HALF_UP));
+        order.setStatus(defaultIfNull(request.getStatus(), ORDER_STATUS_PENDING));
+        order.setOrderId(null);
+        order.setExpireTime(now.plusMinutes(15));
+        order.setCreateTime(now);
+        order.setUpdateTime(now);
+        return order;
     }
 
     private long generateId() {

@@ -20,6 +20,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
@@ -40,6 +41,11 @@ import cn.hutool.core.util.IdUtil;
 public class OrderService {
 
     private static final DateTimeFormatter ORDER_NO_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    private static final int ORDER_STATUS_PENDING = 0;
+    private static final int ORDER_STATUS_PAID = 1;
+    private static final int ORDER_STATUS_CANCELED = 2;
+    private static final int PAY_STATUS_PENDING = 0;
+    private static final int PAY_STATUS_PAID = 1;
 
     private final OrderRepository orderRepository;
     private final RestTemplate restTemplate;
@@ -67,30 +73,56 @@ public class OrderService {
         return orderRepository.findWithItemsById(id);
     }
 
+    public Optional<Order> findByOrderNo(String orderNo) {
+        if (!StringUtils.hasText(orderNo)) {
+            return Optional.empty();
+        }
+        return orderRepository.findByOrderNo(orderNo.trim());
+    }
+
     @Transactional
     public Order create(CreateOrderRequest request) {
+        return createSync(request);
+    }
+
+    @Transactional
+    public Order createSync(CreateOrderRequest request) {
+        return createSync(request, null);
+    }
+
+    @Transactional
+    public Order createSync(CreateOrderRequest request, String predefinedOrderNo) {
         validateCreateRequest(request);
+
+        if (StringUtils.hasText(predefinedOrderNo)) {
+            orderRepository.findByOrderNo(predefinedOrderNo.trim()).ifPresent(existing -> {
+                throw new IllegalArgumentException("订单已存在");
+            });
+        }
 
         LocalDateTime now = LocalDateTime.now();
         Order order = new Order();
         order.setId(generateOrderId());
-        order.setOrderNo(generateOrderNo(now));
+        order.setOrderNo(StringUtils.hasText(predefinedOrderNo)
+                ? predefinedOrderNo.trim()
+                : generateOrderNo(now));
         order.setUserId(request.getUserId());
         order.setType(defaultIfNull(request.getType(), 0));
-        order.setOrderStatus(defaultIfNull(request.getOrderStatus(), 0));
-        order.setPayStatus(defaultIfNull(request.getPayStatus(), 0));
+        order.setOrderStatus(defaultIfNull(request.getOrderStatus(), ORDER_STATUS_PENDING));
+        order.setPayStatus(defaultIfNull(request.getPayStatus(), PAY_STATUS_PENDING));
         order.setCreateTime(now);
         order.setUpdateTime(now);
         order.setExpireTime(request.getExpireTime() == null ? now.plusMinutes(30) : request.getExpireTime());
 
-        if (order.getPayStatus() != null && order.getPayStatus() == 1) {
+        if (order.getPayStatus() != null && order.getPayStatus() == PAY_STATUS_PAID) {
             order.setPayTime(now);
+            order.setOrderStatus(ORDER_STATUS_PAID);
         }
 
         Map<Long, Integer> quantityByGoods = buildQuantityMapFromRequests(request.getItems());
         // 从goods服务中获取价格信息并校验商品状态，构建一个以goodsId为key，price为value的Map，会抛出illegalArgumentException
         Map<Long, BigDecimal> priceByGoods = loadGoodsPriceById(request.getItems());
-        // 向stock服务接口调用调整库存锁定，扣减可用库存并增加锁定库存，如果接口调用失败会抛出异常导致订单创建失败，事务回滚，避免订单和库存数据不一致
+        // 向stock服务接口调用调整库存锁定，扣减可用库存并增加锁定库存，如果接口调用失败会抛出异常导致订单创建失败
         adjustStockWithDelta(quantityByGoods);
 
         List<OrderItem> items = buildItems(request.getItems(), order, now, priceByGoods);
@@ -98,6 +130,48 @@ public class OrderService {
         order.setAmount(calculateOrderAmount(items));
 
         return orderRepository.save(order);
+    }
+
+    @Transactional
+    public boolean expireOrderIfPending(String orderNo) {
+        if (!StringUtils.hasText(orderNo)) {
+            return false;
+        }
+
+        Order order = orderRepository.findByOrderNoForUpdate(orderNo.trim()).orElse(null);
+        if (order == null) {
+            return false;
+        }
+
+        if (order.getOrderStatus() == null || order.getOrderStatus() != ORDER_STATUS_PENDING) {
+            return false;
+        }
+        if (order.getPayStatus() != null && order.getPayStatus() == PAY_STATUS_PAID) {
+            return false;
+        }
+        if (order.getExpireTime() != null && order.getExpireTime().isAfter(LocalDateTime.now())) {
+            return false;
+        }
+
+        Map<Long, Integer> lockedQuantityByGoods = buildQuantityMapFromOrderItems(order.getItems());
+        Map<Long, Integer> releaseDeltaByGoods = new HashMap<>();
+        for (Map.Entry<Long, Integer> entry : lockedQuantityByGoods.entrySet()) {
+            releaseDeltaByGoods.put(entry.getKey(), -entry.getValue());
+        }
+        adjustStockWithDelta(releaseDeltaByGoods);
+
+        order.setOrderStatus(ORDER_STATUS_CANCELED);
+        order.setUpdateTime(LocalDateTime.now());
+        orderRepository.save(order);
+        return true;
+    }
+
+    public void validateCreateRequestPayload(CreateOrderRequest request) {
+        validateCreateRequest(request);
+    }
+
+    public String allocateOrderNo() {
+        return generateOrderNo(LocalDateTime.now());
     }
 
     @Transactional
@@ -115,8 +189,9 @@ public class OrderService {
         }
         if (request.getPayStatus() != null) {
             existing.setPayStatus(request.getPayStatus());
-            if (request.getPayStatus() == 1 && existing.getPayTime() == null) {
+            if (request.getPayStatus() == PAY_STATUS_PAID && existing.getPayTime() == null) {
                 existing.setPayTime(now);
+                existing.setOrderStatus(ORDER_STATUS_PAID);
             }
         }
         if (request.getExpireTime() != null) {

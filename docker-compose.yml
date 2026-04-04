@@ -281,12 +281,21 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
+      kafka:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       DB_URL: ${DB_URL:-jdbc:mysql://proxysql:6033/stock_database?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
       DB_USER: ${DB_USER:-root}
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
+      KAFKA_BOOTSTRAP_SERVERS: ${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
       GOODS_SERVICE_BASE_URL: ${GOODS_SERVICE_BASE_URL:-http://goods-service:8082}
       STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
       TZ: ${TZ:-Asia/Shanghai}

@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.raph.order.dto.CreateOrderRequest;
 import com.raph.order.dto.UpdateOrderRequest;
 import com.raph.order.entity.Order;
+import com.raph.order.service.OrderAsyncService;
 import com.raph.order.service.OrderService;
 
 @RestController
@@ -27,9 +28,11 @@ import com.raph.order.service.OrderService;
 public class OrderController {
 
     private final OrderService orderService;
+    private final OrderAsyncService orderAsyncService;
 
-    public OrderController(OrderService orderService) {
+    public OrderController(OrderService orderService, OrderAsyncService orderAsyncService) {
         this.orderService = orderService;
+        this.orderAsyncService = orderAsyncService;
     }
 
     @GetMapping
@@ -46,11 +49,23 @@ public class OrderController {
         return ResponseEntity.ok(orderOptional.get());
     }
 
+    @GetMapping("/no/{orderNo}")
+    public ResponseEntity<?> detailByOrderNo(@PathVariable String orderNo) {
+        Optional<Order> orderOptional = orderService.findByOrderNo(orderNo);
+        if (orderOptional.isEmpty()) {
+            return errorResponse(HttpStatus.NOT_FOUND, "订单不存在");
+        }
+        return ResponseEntity.ok(orderOptional.get());
+    }
+
     @PostMapping
     public ResponseEntity<?> create(@RequestBody CreateOrderRequest request) {
         try {
-            Order created = orderService.create(request);
-            return ResponseEntity.status(HttpStatus.CREATED).body(created);
+            String orderNo = orderAsyncService.submitCreateOrder(request);
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "下单请求已受理，正在排队处理");
+            response.put("orderNo", orderNo);
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
         } catch (IllegalArgumentException ex) {
             return errorResponse(HttpStatus.BAD_REQUEST, ex.getMessage());
         }

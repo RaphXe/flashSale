@@ -204,9 +204,13 @@ public class OrderService {
             }
 
             Map<Long, Integer> oldQuantityByGoods = buildQuantityMapFromOrderItems(existing.getItems());
+
             Map<Long, Integer> newQuantityByGoods = buildQuantityMapFromRequests(request.getItems());
+
             Map<Long, BigDecimal> priceByGoods = loadGoodsPriceById(request.getItems());
+            
             Map<Long, Integer> quantityDeltaByGoods = buildQuantityDeltaMap(oldQuantityByGoods, newQuantityByGoods);
+
             adjustStockWithDelta(quantityDeltaByGoods);
 
             existing.getItems().clear();

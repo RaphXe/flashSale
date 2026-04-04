@@ -45,6 +45,7 @@ public class SeckillActivityScheduleService {
 
     private final SeckillActivityRepository seckillActivityRepository;
     private final SeckillGoodsRepository seckillGoodsRepository;
+    private final SeckillGoodsService seckillGoodsService;
     private final SeckillActivityService seckillActivityService;
     private final SeckillOrderService seckillOrderService;
     private final StringRedisTemplate stringRedisTemplate;
@@ -62,6 +63,7 @@ public class SeckillActivityScheduleService {
     public SeckillActivityScheduleService(
             SeckillActivityRepository seckillActivityRepository,
             SeckillGoodsRepository seckillGoodsRepository,
+            SeckillGoodsService seckillGoodsService,
             SeckillActivityService seckillActivityService,
             SeckillOrderService seckillOrderService,
             StringRedisTemplate stringRedisTemplate,
@@ -77,6 +79,7 @@ public class SeckillActivityScheduleService {
     ) {
         this.seckillActivityRepository = seckillActivityRepository;
         this.seckillGoodsRepository = seckillGoodsRepository;
+        this.seckillGoodsService = seckillGoodsService;
         this.seckillActivityService = seckillActivityService;
         this.seckillOrderService = seckillOrderService;
         this.stringRedisTemplate = stringRedisTemplate;
@@ -207,9 +210,11 @@ public class SeckillActivityScheduleService {
         if (activity == null) {
             return;
         }
-
+        
         List<SeckillGoods> goodsList = seckillGoodsRepository.findByActivityId(activityId);
+        // 预热活动本身
         writeCache(ACTIVITY_DETAIL_CACHE_KEY_PREFIX + activityId, toCacheActivity(activity));
+        // 预热商品详情
         writeCache(ACTIVITY_GOODS_LIST_CACHE_KEY_PREFIX + activityId, toCacheGoodsList(goodsList));
 
         for (SeckillGoods goods : goodsList) {
@@ -219,6 +224,8 @@ public class SeckillActivityScheduleService {
             SeckillGoods cacheGoods = toCacheGoods(goods);
             writeCache(GOODS_DETAIL_CACHE_KEY_PREFIX + goods.getId(), cacheGoods);
             writeCache(GOODS_ACTIVITY_CACHE_KEY_PREFIX + activityId + ":" + goods.getGoodsId(), cacheGoods);
+            // 将商品库存也预热进redis，便于后续通过redis预扣减保证库存一致性。
+            seckillGoodsService.warmupStockCache(goods);
         }
     }
 

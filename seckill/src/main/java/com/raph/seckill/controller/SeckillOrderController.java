@@ -56,6 +56,21 @@ public class SeckillOrderController {
 
     @GetMapping("/no/{seckillOrderNo}")
     public ResponseEntity<?> detailByOrderNo(@PathVariable String seckillOrderNo) {
+        Optional<String> createStateOptional = seckillOrderService.getCreateStateByOrderNo(seckillOrderNo);
+        if (createStateOptional.isPresent()
+                && SeckillOrderService.ORDER_CREATE_STATE_FAILED.equals(createStateOptional.get())) {
+            String failReason = seckillOrderService.getCreateFailReasonByOrderNo(seckillOrderNo)
+                .orElse("秒杀订单创建失败");
+            return errorResponse(HttpStatus.BAD_REQUEST, failReason);
+        }
+
+        if (createStateOptional.isPresent()
+                && SeckillOrderService.ORDER_CREATE_STATE_PROCESSING.equals(createStateOptional.get())) {
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "订单处理中");
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+        }
+
         Optional<SeckillOrder> orderOptional = seckillOrderService.findByOrderNo(seckillOrderNo);
         if (orderOptional.isEmpty()) {
             return errorResponse(HttpStatus.NOT_FOUND, "秒杀订单不存在");

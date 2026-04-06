@@ -180,6 +180,76 @@ services:
       timeout: 10s
       retries: 20
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: flashsale-prometheus
+    restart: unless-stopped
+    depends_on:
+      seckill-service:
+        condition: service_started
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - flashsale-network
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: flashsale-grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_started
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      TZ: ${TZ:-Asia/Shanghai}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - flashsale-network
+
+  mysql-exporter:
+    image: prom/mysqld-exporter:v0.15.1
+    container_name: flashsale-mysql-exporter
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATA_SOURCE_NAME: ${MYSQL_EXPORTER_DSN:-root:123456@(db:3306)/}
+      TZ: ${TZ:-Asia/Shanghai}
+    expose:
+      - "9104"
+    networks:
+      - flashsale-network
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: flashsale-kafka-exporter
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command:
+      - --kafka.server=kafka:9092
+      - --web.listen-address=:9308
+      - --log.level=info
+    expose:
+      - "9308"
+    networks:
+      - flashsale-network
+
   user-service:
     build:
       context: .
@@ -333,6 +403,10 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       JAVA_TOOL_OPTIONS: ${SECKILL_JAVA_TOOL_OPTIONS:--Duser.timezone=Asia/Shanghai}
       STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
+      MANAGEMENT_SERVER_PORT: ${SECKILL_MANAGEMENT_PORT:-18085}
+    expose:
+      - "8085"
+      - "18085"
     networks:
       - flashsale-network
 
@@ -395,3 +469,5 @@ volumes:
   db_replica_data:
   redis_data:
   elasticsearch_data:
+  prometheus_data:
+  grafana_data:

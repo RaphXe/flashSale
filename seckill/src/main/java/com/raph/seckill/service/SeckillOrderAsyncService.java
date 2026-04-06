@@ -16,6 +16,9 @@ import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+
 import com.raph.seckill.config.RabbitMqConfig;
 import com.raph.seckill.dto.CreateSeckillOrderMessage;
 import com.raph.seckill.dto.CreateSeckillOrderRequest;
@@ -41,6 +44,8 @@ public class SeckillOrderAsyncService {
     private final long timeoutMessageSentTtlSeconds;
     private final long timeoutConsumeLockTtlSeconds;
     private final long timeoutConsumeDoneTtlSeconds;
+    private final MeterRegistry meterRegistry;
+    private final Timer createOrderTimer;
 
     public SeckillOrderAsyncService(
             KafkaTemplate<String, CreateSeckillOrderMessage> kafkaTemplate,
@@ -53,7 +58,8 @@ public class SeckillOrderAsyncService {
             @Value("${seckill.order.timeout.delay-ms:900000}") long timeoutDelayMs,
             @Value("${seckill.order.timeout.message.sent-ttl-seconds:172800}") long timeoutMessageSentTtlSeconds,
             @Value("${seckill.order.timeout.consume.idempotent.lock-ttl-seconds:600}") long timeoutConsumeLockTtlSeconds,
-            @Value("${seckill.order.timeout.consume.idempotent.done-ttl-seconds:604800}") long timeoutConsumeDoneTtlSeconds
+            @Value("${seckill.order.timeout.consume.idempotent.done-ttl-seconds:604800}") long timeoutConsumeDoneTtlSeconds,
+            MeterRegistry meterRegistry
     ) {
         this.kafkaTemplate = kafkaTemplate;
         this.rabbitTemplate = rabbitTemplate;
@@ -66,18 +72,35 @@ public class SeckillOrderAsyncService {
         this.timeoutMessageSentTtlSeconds = timeoutMessageSentTtlSeconds;
         this.timeoutConsumeLockTtlSeconds = timeoutConsumeLockTtlSeconds;
         this.timeoutConsumeDoneTtlSeconds = timeoutConsumeDoneTtlSeconds;
+        this.meterRegistry = meterRegistry;
+        this.createOrderTimer = Timer.builder("seckill_order_create_duration")
+                .description("Kafka consumer createSync processing duration")
+                .register(meterRegistry);
     }
 
     // 生产者，提交创建订单请求，发送到Kafka
     public String submitCreateOrder(CreateSeckillOrderRequest request) {
-        seckillOrderService.validateCreateRequestPayload(request);
+        try {
+            seckillOrderService.validateCreateRequestPayload(request);
+        } catch (IllegalArgumentException ex) {
+            meterRegistry.counter("seckill_order_async_submit", "result", "validation_rejected").increment();
+            throw ex;
+        }
         // 同步创建订单号
         String orderNo = seckillOrderService.allocateOrderNo();
         // 使用userId作为消息key，确保同一用户订单有序
         String messageKey = buildMessageKey(request.getUserId());
+        seckillOrderService.markOrderCreateStateProcessing(orderNo);
 
         CreateSeckillOrderMessage message = buildMessage(request, orderNo);
-        kafkaTemplate.send(createOrderTopic, messageKey, message);
+        try {
+            kafkaTemplate.send(createOrderTopic, messageKey, message);
+            meterRegistry.counter("seckill_order_async_submit", "result", "accepted").increment();
+        } catch (RuntimeException ex) {
+            seckillOrderService.markOrderCreateStateFailed(orderNo, "下单请求发送失败，请稍后重试");
+            meterRegistry.counter("seckill_order_async_submit", "result", "send_error").increment();
+            throw ex;
+        }
         return orderNo;
     }
 
@@ -87,8 +110,16 @@ public class SeckillOrderAsyncService {
             CreateSeckillOrderMessage message,
             @Header(value = KafkaHeaders.RECEIVED_KEY, required = false) String messageKey
     ) {
-        String orderNo = message == null ? null : message.getSeckillOrderNo();
-        if (!StringUtils.hasText(orderNo)) {
+        if (message == null) {
+            meterRegistry.counter("seckill_order_kafka_consume_invalid", "reason", "null_message").increment();
+            log.warn("异步创建秒杀订单失败，消息为空, key={}", messageKey);
+            return;
+        }
+
+        String orderNo = message.getSeckillOrderNo();
+
+        if (orderNo == null) {
+            meterRegistry.counter("seckill_order_kafka_consume_invalid", "reason", "missing_order_no").increment();
             log.warn("异步创建秒杀订单失败，消息缺少订单号, key={}", messageKey);
             return;
         }
@@ -101,23 +132,32 @@ public class SeckillOrderAsyncService {
                 Duration.ofSeconds(consumeLockTtlSeconds)
         );
         if (!Boolean.TRUE.equals(acquired)) {
+            meterRegistry.counter("seckill_order_kafka_consume_idempotent_hit").increment();
+            meterRegistry.counter("seckill_order_kafka_consume", "result", "idempotent_ignored").increment();
             log.info("异步创建秒杀订单命中幂等校验，忽略重复消息, key={}, orderNo={}", messageKey, orderNo);
             return;
         }
 
         try {
-            SeckillOrder createdOrder = seckillOrderService.createSync(toRequest(message), orderNo);
+            SeckillOrder createdOrder = createOrderTimer.record(() ->
+                    seckillOrderService.createSync(toRequest(message), orderNo)
+            );
             publishTimeoutMessageOnce(createdOrder);
+            seckillOrderService.markOrderCreateStateSuccess(orderNo);
             // 订单创建成功，记录到缓存中
             stringRedisTemplate.opsForValue().set(
                     idempotentKey,
                     "DONE",
                     Duration.ofSeconds(consumeDoneTtlSeconds)
             );
+            meterRegistry.counter("seckill_order_kafka_consume", "result", "success").increment();
         } catch (IllegalArgumentException ex) {
             // 如果因为重复消费导致订单已存在，补发一次超时消息，保证超时关闭链路完整。
             if (shouldRecoverByExistingOrder(ex)) {
+                seckillOrderService.markOrderCreateStateSuccess(orderNo);
                 seckillOrderService.findByOrderNo(orderNo).ifPresent(this::publishTimeoutMessageOnce);
+            } else {
+                seckillOrderService.markOrderCreateStateFailed(orderNo, ex.getMessage());
             }
             // 订单创建失败，记录到缓存中，避免重复消费导致死循环
             stringRedisTemplate.opsForValue().set(
@@ -125,10 +165,12 @@ public class SeckillOrderAsyncService {
                     "REJECTED",
                     Duration.ofSeconds(consumeDoneTtlSeconds)
             );
+            meterRegistry.counter("seckill_order_kafka_consume", "result", "business_rejected").increment();
             // 业务异常，记录日志但不重试，避免死循环
             log.warn("异步创建秒杀订单失败，丢弃消息, key={}, err={}", messageKey, ex.getMessage());
         } catch (Exception ex) {
             stringRedisTemplate.delete(idempotentKey);
+            meterRegistry.counter("seckill_order_kafka_consume", "result", "exception_retry").increment();
             log.error("异步创建秒杀订单异常，将由Kafka重试, key={}", messageKey, ex);
             throw ex;
         }

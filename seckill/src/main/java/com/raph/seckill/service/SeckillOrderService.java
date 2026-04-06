@@ -1,6 +1,7 @@
 package com.raph.seckill.service;
 
 import java.math.RoundingMode;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
@@ -8,7 +9,9 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -31,7 +34,13 @@ public class SeckillOrderService {
     private static final int ORDER_STATUS_CREATED = 1;
     private static final int ORDER_STATUS_TIMEOUT = 2;
     private static final int ORDER_STATUS_CANCELED = 3;
+    private static final long ORDER_REDIS_EXPIRE_MINUTES = 30;
+    public static final String ORDER_CREATE_STATE_PROCESSING = "PROCESSING";
+    public static final String ORDER_CREATE_STATE_SUCCESS = "SUCCESS";
+    public static final String ORDER_CREATE_STATE_FAILED = "FAILED";
 
+    private final RedisTemplate<String, String> orderStateTemplate;
+    private final RedisTemplate<String, SeckillOrder> seckillOrderRedisTemplate;
     private final SeckillOrderRepository seckillOrderRepository;
     private final SeckillGoodsService seckillGoodsService;
     private final SeckillActivityService seckillActivityService;
@@ -39,9 +48,13 @@ public class SeckillOrderService {
 
     public SeckillOrderService(SeckillOrderRepository seckillOrderRepository,
                                SeckillGoodsService seckillGoodsService,
+                                                             @Qualifier("orderStateTemplate") RedisTemplate<String, String> orderStateTemplate,
+                               @Qualifier("seckillOrderRedisTemplate") RedisTemplate<String, SeckillOrder> seckillOrderRedisTemplate,
                                SeckillActivityService seckillActivityService,
                                @Value("${snowflake.worker-id:1}") long workerId,
                                @Value("${snowflake.datacenter-id:1}") long datacenterId) {
+        this.seckillOrderRedisTemplate = seckillOrderRedisTemplate;
+                this.orderStateTemplate = orderStateTemplate;
         this.seckillOrderRepository = seckillOrderRepository;
         this.seckillGoodsService = seckillGoodsService;
         this.seckillActivityService = seckillActivityService;
@@ -78,17 +91,56 @@ public class SeckillOrderService {
         if (!StringUtils.hasText(seckillOrderNo)) {
             return Optional.empty();
         }
-        return seckillOrderRepository.findBySeckillOrderNo(seckillOrderNo.trim());
+
+        String normalizedOrderNo = seckillOrderNo.trim();
+        String orderKey = buildOrderCacheKey(normalizedOrderNo);
+        SeckillOrder cachedOrder = seckillOrderRedisTemplate.opsForValue().get(orderKey);
+        if (cachedOrder != null) {
+            return Optional.of(cachedOrder);
+        }
+
+        String orderState = orderStateTemplate.opsForValue().get(buildOrderStateCacheKey(normalizedOrderNo));
+        if (ORDER_CREATE_STATE_FAILED.equals(orderState)) {
+            return Optional.empty();
+        }
+
+        Optional<SeckillOrder> dbOrder = seckillOrderRepository.findBySeckillOrderNo(normalizedOrderNo);
+        dbOrder.ifPresent(order -> seckillOrderRedisTemplate.opsForValue()
+                .set(orderKey, order, Duration.ofMinutes(ORDER_REDIS_EXPIRE_MINUTES)));
+        return dbOrder;
     }
 
-    @Transactional
-    public SeckillOrder create(CreateSeckillOrderRequest request) {
-        return createSync(request);
+    public Optional<String> getCreateStateByOrderNo(String seckillOrderNo) {
+        if (!StringUtils.hasText(seckillOrderNo)) {
+            return Optional.empty();
+        }
+
+        return Optional.ofNullable(orderStateTemplate.opsForValue().get(buildOrderStateCacheKey(seckillOrderNo.trim())));
     }
 
-    @Transactional
-    public SeckillOrder createSync(CreateSeckillOrderRequest request) {
-        return createSync(request, null);
+    public Optional<String> getCreateFailReasonByOrderNo(String seckillOrderNo) {
+        if (!StringUtils.hasText(seckillOrderNo)) {
+            return Optional.empty();
+        }
+
+        return Optional.ofNullable(orderStateTemplate.opsForValue().get(buildOrderFailReasonCacheKey(seckillOrderNo.trim())));
+    }
+
+    public void markOrderCreateStateProcessing(String seckillOrderNo) {
+        setOrderCreateState(seckillOrderNo, ORDER_CREATE_STATE_PROCESSING);
+    }
+
+    public void markOrderCreateStateSuccess(String seckillOrderNo) {
+        setOrderCreateState(seckillOrderNo, ORDER_CREATE_STATE_SUCCESS);
+    }
+
+    public void markOrderCreateStateFailed(String seckillOrderNo) {
+        markOrderCreateStateFailed(seckillOrderNo, "秒杀订单创建失败");
+    }
+
+    public void markOrderCreateStateFailed(String seckillOrderNo, String failReason) {
+        setOrderCreateFailReason(seckillOrderNo, failReason);
+        setOrderCreateState(seckillOrderNo, ORDER_CREATE_STATE_FAILED);
     }
 
     @Transactional
@@ -113,10 +165,15 @@ public class SeckillOrderService {
         
         try {
             SeckillOrder order = buildOrderForCreate(request, predefinedOrderNo);
+            order = seckillOrderRepository.save(order);
+            markOrderCreateStateSuccess(predefinedOrderNo);
+            seckillOrderRedisTemplate.opsForValue().set("seckill_order:" + predefinedOrderNo, order, Duration.ofMinutes(ORDER_REDIS_EXPIRE_MINUTES));
 
-            return seckillOrderRepository.save(order);
+            return order;
         } catch (RuntimeException ex) {
             try {
+                // 创建订单失败，记录失败结果到 Redis，供前端查询
+                markOrderCreateStateFailed(predefinedOrderNo, ex.getMessage());
                 // 创建订单失败，回滚锁定库存
                 seckillGoodsService.releaseLockedStockForOrder(request.getActivityId(), request.getGoodsId(), request.getQuantity());
             } catch (RuntimeException rollbackEx) {
@@ -302,9 +359,7 @@ public class SeckillOrderService {
         LocalDateTime now = LocalDateTime.now();
         SeckillOrder order = new SeckillOrder();
         order.setId(generateId());
-        order.setSeckillOrderNo(StringUtils.hasText(predefinedOrderNo)
-                ? predefinedOrderNo.trim()
-                : generateOrderNo(now));
+        order.setSeckillOrderNo(predefinedOrderNo.trim());
         order.setActivityId(request.getActivityId());
         order.setGoodsId(request.getGoodsId());
         order.setUserId(request.getUserId());
@@ -328,5 +383,45 @@ public class SeckillOrderService {
     private String generateOrderNo(LocalDateTime now) {
         long random = ThreadLocalRandom.current().nextLong(1000L, 9999L);
         return "SCK" + now.format(ORDER_NO_TIME_FORMATTER) + random;
+    }
+
+    private void setOrderCreateState(String orderNo, String state) {
+        if (!StringUtils.hasText(orderNo) || !StringUtils.hasText(state)) {
+            return;
+        }
+        String normalizedOrderNo = orderNo.trim();
+        orderStateTemplate.opsForValue().set(
+                buildOrderStateCacheKey(normalizedOrderNo),
+                state,
+                Duration.ofMinutes(ORDER_REDIS_EXPIRE_MINUTES)
+        );
+        if (!ORDER_CREATE_STATE_FAILED.equals(state)) {
+            orderStateTemplate.delete(buildOrderFailReasonCacheKey(normalizedOrderNo));
+        }
+    }
+
+    private void setOrderCreateFailReason(String orderNo, String failReason) {
+        if (!StringUtils.hasText(orderNo)) {
+            return;
+        }
+
+        String normalizedReason = StringUtils.hasText(failReason) ? failReason.trim() : "秒杀订单创建失败";
+        orderStateTemplate.opsForValue().set(
+                buildOrderFailReasonCacheKey(orderNo.trim()),
+                normalizedReason,
+                Duration.ofMinutes(ORDER_REDIS_EXPIRE_MINUTES)
+        );
+    }
+
+    private String buildOrderStateCacheKey(String orderNo) {
+        return "seckill_order_state:" + orderNo;
+    }
+
+    private String buildOrderFailReasonCacheKey(String orderNo) {
+        return "seckill_order_state_reason:" + orderNo;
+    }
+
+    private String buildOrderCacheKey(String orderNo) {
+        return "seckill_order:" + orderNo;
     }
 }

@@ -1,0 +1,437 @@
+{
+    "id": null,
+    "uid": "seckill-async-obsv",
+    "title": "Seckill Async Order Observability",
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 3,
+    "refresh": "10s",
+    "tags": [
+        "seckill",
+        "kafka",
+        "micrometer"
+    ],
+    "templating": {
+        "list": []
+    },
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "Submit QPS (Accepted)",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(seckill_order_async_submit_total{job=\"seckill-service\",result=\"accepted\"}[1m]))",
+                    "legendFormat": "accepted"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_async_submit_total{job=\"seckill-service\",result=\"validation_rejected\"}[1m]))",
+                    "legendFormat": "validation_rejected"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_async_submit_total{job=\"seckill-service\",result=\"send_error\"}[1m]))",
+                    "legendFormat": "send_error"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Kafka Consume QPS By Result",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(seckill_order_kafka_consume_total{job=\"seckill-service\",result=\"success\"}[1m]))",
+                    "legendFormat": "success"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_kafka_consume_total{job=\"seckill-service\",result=\"business_rejected\"}[1m]))",
+                    "legendFormat": "business_rejected"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_kafka_consume_total{job=\"seckill-service\",result=\"exception_retry\"}[1m]))",
+                    "legendFormat": "exception_retry"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_kafka_consume_total{job=\"seckill-service\",result=\"idempotent_ignored\"}[1m]))",
+                    "legendFormat": "idempotent_ignored"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Idempotent Hit & Invalid Message QPS",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(seckill_order_kafka_consume_idempotent_hit_total{job=\"seckill-service\"}[1m]))",
+                    "legendFormat": "idempotent_hit"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_kafka_consume_invalid_total{job=\"seckill-service\",reason=\"null_message\"}[1m]))",
+                    "legendFormat": "invalid_null_message"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_kafka_consume_invalid_total{job=\"seckill-service\",reason=\"missing_order_no\"}[1m]))",
+                    "legendFormat": "invalid_missing_order_no"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "CreateSync Latency (P50/P95/P99)",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 8
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.50, sum by (le) (rate(seckill_order_create_duration_seconds_bucket{job=\"seckill-service\"}[5m])))",
+                    "legendFormat": "p50"
+                },
+                {
+                    "expr": "histogram_quantile(0.95, sum by (le) (rate(seckill_order_create_duration_seconds_bucket{job=\"seckill-service\"}[5m])))",
+                    "legendFormat": "p95"
+                },
+                {
+                    "expr": "histogram_quantile(0.99, sum by (le) (rate(seckill_order_create_duration_seconds_bucket{job=\"seckill-service\"}[5m])))",
+                    "legendFormat": "p99"
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "Consume Success Ratio (5m)",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 5,
+                "w": 8,
+                "x": 0,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "sum(increase(seckill_order_kafka_consume_total{job=\"seckill-service\",result=\"success\"}[5m])) / clamp_min(sum(increase(seckill_order_kafka_consume_total{job=\"seckill-service\"}[5m])), 1)",
+                    "legendFormat": "success_ratio"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percentunit",
+                    "min": 0,
+                    "max": 1
+                },
+                "overrides": []
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Average CreateSync Latency (ms, 5m)",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 5,
+                "w": 8,
+                "x": 8,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "(sum(rate(seckill_order_create_duration_seconds_sum{job=\"seckill-service\"}[5m])) / clamp_min(sum(rate(seckill_order_create_duration_seconds_count{job=\"seckill-service\"}[5m])), 1)) * 1000",
+                    "legendFormat": "avg_ms"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "ms",
+                    "min": 0
+                },
+                "overrides": []
+            }
+        },
+        {
+            "type": "stat",
+            "title": "Consumer Retry QPS",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 5,
+                "w": 8,
+                "x": 16,
+                "y": 16
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(seckill_order_kafka_consume_total{job=\"seckill-service\",result=\"exception_retry\"}[1m]))",
+                    "legendFormat": "retry_qps"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "reqps",
+                    "min": 0
+                },
+                "overrides": []
+            }
+        },
+        {
+            "type": "timeseries",
+            "title": "Kafka Consumer Lag",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 21
+            },
+            "targets": [
+                {
+                    "expr": "sum(kafka_consumergroup_lag{job=\"kafka-exporter\"})",
+                    "legendFormat": "total_lag"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "MySQL QPS / TPS",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 21
+            },
+            "targets": [
+                {
+                    "expr": "rate(mysql_global_status_queries{job=\"mysql-exporter\"}[1m])",
+                    "legendFormat": "qps"
+                },
+                {
+                    "expr": "rate(mysql_global_status_com_commit{job=\"mysql-exporter\"}[1m]) + rate(mysql_global_status_com_rollback{job=\"mysql-exporter\"}[1m])",
+                    "legendFormat": "tps"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "MySQL Slow Query / Lock Wait",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 29
+            },
+            "targets": [
+                {
+                    "expr": "rate(mysql_global_status_slow_queries{job=\"mysql-exporter\"}[1m])",
+                    "legendFormat": "slow_queries_per_sec"
+                },
+                {
+                    "expr": "rate(mysql_global_status_innodb_row_lock_waits{job=\"mysql-exporter\"}[1m])",
+                    "legendFormat": "innodb_lock_waits_per_sec"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "MySQL Connections / Buffer Pool Hit",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 29
+            },
+            "targets": [
+                {
+                    "expr": "mysql_global_status_threads_connected{job=\"mysql-exporter\"}",
+                    "legendFormat": "threads_connected"
+                },
+                {
+                    "expr": "1 - (rate(mysql_global_status_innodb_buffer_pool_reads{job=\"mysql-exporter\"}[5m]) / clamp_min(rate(mysql_global_status_innodb_buffer_pool_read_requests{job=\"mysql-exporter\"}[5m]), 1))",
+                    "legendFormat": "buffer_pool_hit_ratio"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "JVM GC Pause (P95/P99)",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 37
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.95, sum by (le) (rate(jvm_gc_pause_seconds_bucket{job=\"seckill-service\"}[5m])))",
+                    "legendFormat": "gc_pause_p95"
+                },
+                {
+                    "expr": "histogram_quantile(0.99, sum by (le) (rate(jvm_gc_pause_seconds_bucket{job=\"seckill-service\"}[5m])))",
+                    "legendFormat": "gc_pause_p99"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "JVM Heap Usage / Hikari Active-Pending",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 37
+            },
+            "targets": [
+                {
+                    "expr": "sum(jvm_memory_used_bytes{job=\"seckill-service\",area=\"heap\"}) / clamp_min(sum(jvm_memory_max_bytes{job=\"seckill-service\",area=\"heap\"}), 1)",
+                    "legendFormat": "heap_used_ratio"
+                },
+                {
+                    "expr": "sum(hikaricp_connections_active{job=\"seckill-service\"})",
+                    "legendFormat": "hikari_active"
+                },
+                {
+                    "expr": "sum(hikaricp_connections_pending{job=\"seckill-service\"})",
+                    "legendFormat": "hikari_pending"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Thread Pool Queue Length",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 45
+            },
+            "targets": [
+                {
+                    "expr": "sum(executor_queued_tasks{job=\"seckill-service\"}) or vector(0)",
+                    "legendFormat": "executor_queued_tasks"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Create API 2xx / 4xx / 5xx",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 45
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(http_server_requests_seconds_count{job=\"seckill-service\",method=\"POST\",uri=~\"/api/seckill/order|/api/seckill/order/\",status=~\"2..\"}[1m]))",
+                    "legendFormat": "2xx"
+                },
+                {
+                    "expr": "sum(rate(http_server_requests_seconds_count{job=\"seckill-service\",method=\"POST\",uri=~\"/api/seckill/order|/api/seckill/order/\",status=~\"4..\"}[1m]))",
+                    "legendFormat": "4xx"
+                },
+                {
+                    "expr": "sum(rate(http_server_requests_seconds_count{job=\"seckill-service\",method=\"POST\",uri=~\"/api/seckill/order|/api/seckill/order/\",status=~\"5..\"}[1m]))",
+                    "legendFormat": "5xx"
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "Query Status Distribution (PENDING/SUCCESS/FAILED)",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "Prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 24,
+                "x": 0,
+                "y": 53
+            },
+            "targets": [
+                {
+                    "expr": "sum(rate(seckill_order_query_status_total{job=\"seckill-service\",status=\"PENDING\"}[1m])) or vector(0)",
+                    "legendFormat": "PENDING"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_query_status_total{job=\"seckill-service\",status=\"SUCCESS\"}[1m])) or vector(0)",
+                    "legendFormat": "SUCCESS"
+                },
+                {
+                    "expr": "sum(rate(seckill_order_query_status_total{job=\"seckill-service\",status=\"FAILED\"}[1m])) or vector(0)",
+                    "legendFormat": "FAILED"
+                }
+            ]
+        }
+    ]
+}

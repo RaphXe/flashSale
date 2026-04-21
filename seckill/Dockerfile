@@ -17,6 +17,8 @@ WORKDIR /app
 
 COPY --from=builder /build/seckill/target/seckill-0.0.1-SNAPSHOT.jar /app/seckill-service.jar
 
+ENV SPRING_THREADS_VIRTUAL_ENABLED=true
+
 EXPOSE 8085
 
 ENTRYPOINT ["java", "-jar", "seckill-service.jar"]

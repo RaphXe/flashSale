@@ -17,6 +17,8 @@ WORKDIR /app
 
 COPY --from=builder /build/order/target/order-0.0.1-SNAPSHOT.jar /app/order-service.jar
 
+ENV SPRING_THREADS_VIRTUAL_ENABLED=true
+
 EXPOSE 8084
 
 ENTRYPOINT ["java", "-jar", "order-service.jar"]

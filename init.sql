@@ -137,6 +137,42 @@ CREATE TABLE `seckill_order` (
   CONSTRAINT `fk_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 -- ----------------------------
+-- Table structure for seckill_local_message
+-- ----------------------------
+DROP TABLE IF EXISTS `seckill_local_message`;
+CREATE TABLE `seckill_local_message` (
+  `id` bigint NOT NULL COMMENT '主键，建议使用雪花ID',
+  `message_id` varchar(64) NOT NULL COMMENT '消息唯一ID，用于MQ幂等',
+  `biz_type` varchar(64) NOT NULL COMMENT '业务类型，例如 SECKILL_ORDER_TIMEOUT',
+  `biz_key` varchar(128) NOT NULL COMMENT '业务唯一键，秒杀下单场景使用 seckill_order_no',
+  `seckill_order_no` varchar(64) NOT NULL COMMENT '秒杀订单号',
+  `activity_id` bigint NOT NULL COMMENT '秒杀活动ID',
+  `goods_id` bigint NOT NULL COMMENT '商品ID',
+  `user_id` bigint NOT NULL COMMENT '用户ID',
+  `quantity` int NOT NULL COMMENT '购买数量',
+  `destination_type` tinyint NOT NULL COMMENT '目标类型：1-Kafka，2-RabbitMQ，3-HTTP，4-内部补偿任务',
+  `destination` varchar(255) NOT NULL COMMENT '目标地址，例如 topic、exchange、接口名',
+  `routing_key` varchar(255) DEFAULT NULL COMMENT 'RabbitMQ routing key 或 Kafka message key',
+  `payload` json NOT NULL COMMENT '消息体快照，保存最终投递所需的完整业务数据',
+  `status` tinyint NOT NULL DEFAULT 0 COMMENT '消息状态：0-待投递，1-投递中，2-已投递，3-已确认，4-投递失败，5-死亡',
+  `retry_count` int NOT NULL DEFAULT 0 COMMENT '已重试次数',
+  `max_retry_count` int NOT NULL DEFAULT 10 COMMENT '最大重试次数',
+  `next_retry_time` datetime NOT NULL COMMENT '下次可重试时间',
+  `last_error` varchar(1024) DEFAULT NULL COMMENT '最近一次失败原因',
+  `sent_time` datetime DEFAULT NULL COMMENT '最近一次投递时间',
+  `confirmed_time` datetime DEFAULT NULL COMMENT '最终确认时间',
+  `version` int NOT NULL DEFAULT 0 COMMENT '乐观锁版本号，防止并发扫描重复更新',
+  `create_time` datetime NOT NULL COMMENT '创建时间',
+  `update_time` datetime NOT NULL COMMENT '更新时间',
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uk_message_id` (`message_id`) USING BTREE,
+  UNIQUE KEY `uk_biz_type_key` (`biz_type`, `biz_key`) USING BTREE,
+  KEY `idx_status_next_retry` (`status`, `next_retry_time`) USING BTREE,
+  KEY `idx_seckill_order_no` (`seckill_order_no`) USING BTREE,
+  KEY `idx_user_activity_goods` (`user_id`, `activity_id`, `goods_id`) USING BTREE,
+  KEY `idx_create_time` (`create_time`) USING BTREE
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic COMMENT = '秒杀本地消息表，用于分布式事务最终一致性';
+-- ----------------------------
 -- Table structure for stock
 -- ----------------------------
 DROP TABLE IF EXISTS `stock`;

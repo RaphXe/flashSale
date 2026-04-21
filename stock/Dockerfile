@@ -17,6 +17,8 @@ WORKDIR /app
 
 COPY --from=builder /build/stock/target/stock-0.0.1-SNAPSHOT.jar /app/stock-service.jar
 
+ENV SPRING_THREADS_VIRTUAL_ENABLED=true
+
 EXPOSE 8083
 
 ENTRYPOINT ["java", "-jar", "stock-service.jar"]

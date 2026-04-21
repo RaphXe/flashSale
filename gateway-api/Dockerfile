@@ -17,6 +17,8 @@ WORKDIR /app
 
 COPY --from=builder /build/gateway-api/target/gateway-service-0.0.1-SNAPSHOT.jar /app/gateway-service.jar
 
+ENV SPRING_THREADS_VIRTUAL_ENABLED=true
+
 EXPOSE 8080
 
 ENTRYPOINT ["java", "-jar", "gateway-service.jar"]

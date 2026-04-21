@@ -44,6 +44,7 @@ public class SeckillOrderService {
     private final SeckillOrderRepository seckillOrderRepository;
     private final SeckillGoodsService seckillGoodsService;
     private final SeckillActivityService seckillActivityService;
+    private final SeckillLocalMessageService seckillLocalMessageService;
     private final Snowflake snowflake;
 
     public SeckillOrderService(SeckillOrderRepository seckillOrderRepository,
@@ -51,6 +52,7 @@ public class SeckillOrderService {
                                                              @Qualifier("orderStateTemplate") RedisTemplate<String, String> orderStateTemplate,
                                @Qualifier("seckillOrderRedisTemplate") RedisTemplate<String, SeckillOrder> seckillOrderRedisTemplate,
                                SeckillActivityService seckillActivityService,
+                               SeckillLocalMessageService seckillLocalMessageService,
                                @Value("${snowflake.worker-id:1}") long workerId,
                                @Value("${snowflake.datacenter-id:1}") long datacenterId) {
         this.seckillOrderRedisTemplate = seckillOrderRedisTemplate;
@@ -58,6 +60,7 @@ public class SeckillOrderService {
         this.seckillOrderRepository = seckillOrderRepository;
         this.seckillGoodsService = seckillGoodsService;
         this.seckillActivityService = seckillActivityService;
+        this.seckillLocalMessageService = seckillLocalMessageService;
         this.snowflake = IdUtil.getSnowflake(workerId, datacenterId);
     }
 
@@ -166,6 +169,8 @@ public class SeckillOrderService {
         try {
             SeckillOrder order = buildOrderForCreate(request, predefinedOrderNo);
             order = seckillOrderRepository.save(order);
+            // 订单、库存、本地消息共用同一个事务，避免订单已创建但超时关闭消息丢失。
+            seckillLocalMessageService.saveOrderTimeoutMessage(order);
             markOrderCreateStateSuccess(predefinedOrderNo);
             seckillOrderRedisTemplate.opsForValue().set("seckill_order:" + predefinedOrderNo, order, Duration.ofMinutes(ORDER_REDIS_EXPIRE_MINUTES));
 

@@ -4,9 +4,7 @@ import java.time.Duration;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.amqp.core.Message;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -19,29 +17,23 @@ import org.springframework.util.StringUtils;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 
-import com.raph.seckill.config.RabbitMqConfig;
 import com.raph.seckill.dto.CreateSeckillOrderMessage;
 import com.raph.seckill.dto.CreateSeckillOrderRequest;
 import com.raph.seckill.dto.SeckillOrderTimeoutMessage;
-import com.raph.seckill.entity.SeckillOrder;
 
 @Service
 public class SeckillOrderAsyncService {
 
     private static final Logger log = LoggerFactory.getLogger(SeckillOrderAsyncService.class);
     private static final String ORDER_CONSUME_IDEMPOTENT_KEY_PREFIX = "seckill:order:consume:idempotent:";
-    private static final String ORDER_TIMEOUT_MESSAGE_SENT_KEY_PREFIX = "seckill:order:timeout:message:sent:";
     private static final String ORDER_TIMEOUT_CONSUME_IDEMPOTENT_KEY_PREFIX = "seckill:order:timeout:consume:idempotent:";
 
     private final KafkaTemplate<String, CreateSeckillOrderMessage> kafkaTemplate;
-    private final RabbitTemplate rabbitTemplate;
     private final StringRedisTemplate stringRedisTemplate;
     private final SeckillOrderService seckillOrderService;
     private final String createOrderTopic;
     private final long consumeLockTtlSeconds;
     private final long consumeDoneTtlSeconds;
-    private final long timeoutDelayMs;
-    private final long timeoutMessageSentTtlSeconds;
     private final long timeoutConsumeLockTtlSeconds;
     private final long timeoutConsumeDoneTtlSeconds;
     private final MeterRegistry meterRegistry;
@@ -49,27 +41,21 @@ public class SeckillOrderAsyncService {
 
     public SeckillOrderAsyncService(
             KafkaTemplate<String, CreateSeckillOrderMessage> kafkaTemplate,
-            RabbitTemplate rabbitTemplate,
             StringRedisTemplate stringRedisTemplate,
             SeckillOrderService seckillOrderService,
             @Value("${seckill.order.kafka.topic:seckill-order-create}") String createOrderTopic,
             @Value("${seckill.order.consume.idempotent.lock-ttl-seconds:600}") long consumeLockTtlSeconds,
             @Value("${seckill.order.consume.idempotent.done-ttl-seconds:604800}") long consumeDoneTtlSeconds,
-            @Value("${seckill.order.timeout.delay-ms:900000}") long timeoutDelayMs,
-            @Value("${seckill.order.timeout.message.sent-ttl-seconds:172800}") long timeoutMessageSentTtlSeconds,
             @Value("${seckill.order.timeout.consume.idempotent.lock-ttl-seconds:600}") long timeoutConsumeLockTtlSeconds,
             @Value("${seckill.order.timeout.consume.idempotent.done-ttl-seconds:604800}") long timeoutConsumeDoneTtlSeconds,
             MeterRegistry meterRegistry
     ) {
         this.kafkaTemplate = kafkaTemplate;
-        this.rabbitTemplate = rabbitTemplate;
         this.stringRedisTemplate = stringRedisTemplate;
         this.seckillOrderService = seckillOrderService;
         this.createOrderTopic = createOrderTopic;
         this.consumeLockTtlSeconds = consumeLockTtlSeconds;
         this.consumeDoneTtlSeconds = consumeDoneTtlSeconds;
-        this.timeoutDelayMs = timeoutDelayMs;
-        this.timeoutMessageSentTtlSeconds = timeoutMessageSentTtlSeconds;
         this.timeoutConsumeLockTtlSeconds = timeoutConsumeLockTtlSeconds;
         this.timeoutConsumeDoneTtlSeconds = timeoutConsumeDoneTtlSeconds;
         this.meterRegistry = meterRegistry;
@@ -139,10 +125,9 @@ public class SeckillOrderAsyncService {
         }
 
         try {
-            SeckillOrder createdOrder = createOrderTimer.record(() ->
+            createOrderTimer.record(() ->
                     seckillOrderService.createSync(toRequest(message), orderNo)
             );
-            publishTimeoutMessageOnce(createdOrder);
             seckillOrderService.markOrderCreateStateSuccess(orderNo);
             // 订单创建成功，记录到缓存中
             stringRedisTemplate.opsForValue().set(
@@ -152,10 +137,9 @@ public class SeckillOrderAsyncService {
             );
             meterRegistry.counter("seckill_order_kafka_consume", "result", "success").increment();
         } catch (IllegalArgumentException ex) {
-            // 如果因为重复消费导致订单已存在，补发一次超时消息，保证超时关闭链路完整。
+            // 如果因为重复消费导致订单已存在，本地消息表中的超时消息会继续由投递器补偿发送。
             if (shouldRecoverByExistingOrder(ex)) {
                 seckillOrderService.markOrderCreateStateSuccess(orderNo);
-                seckillOrderService.findByOrderNo(orderNo).ifPresent(this::publishTimeoutMessageOnce);
             } else {
                 seckillOrderService.markOrderCreateStateFailed(orderNo, ex.getMessage());
             }
@@ -220,10 +204,6 @@ public class SeckillOrderAsyncService {
         return ORDER_CONSUME_IDEMPOTENT_KEY_PREFIX + orderNo;
     }
 
-    private String buildTimeoutMessageSentKey(String orderNo) {
-        return ORDER_TIMEOUT_MESSAGE_SENT_KEY_PREFIX + orderNo;
-    }
-
     private String buildTimeoutConsumeIdempotentKey(String orderNo) {
         return ORDER_TIMEOUT_CONSUME_IDEMPOTENT_KEY_PREFIX + orderNo;
     }
@@ -255,43 +235,6 @@ public class SeckillOrderAsyncService {
         request.setExpireTime(message.getExpireTime());
         request.setStatus(message.getStatus());
         return request;
-    }
-
-    // 使用RabbitMQ，发送延时消息，关闭超时订单
-    private void publishTimeoutMessageOnce(SeckillOrder order) {
-        if (order == null || !StringUtils.hasText(order.getSeckillOrderNo())) {
-            return;
-        }
-
-        String sentKey = buildTimeoutMessageSentKey(order.getSeckillOrderNo());
-        // 获取分布式锁，确保同一订单只发送一次超时消息
-        Boolean firstPublish = stringRedisTemplate.opsForValue().setIfAbsent(
-                sentKey,
-                "SENT",
-                Duration.ofSeconds(timeoutMessageSentTtlSeconds)
-        );
-        if (!Boolean.TRUE.equals(firstPublish)) {
-            return;
-        }
-
-        SeckillOrderTimeoutMessage timeoutMessage = new SeckillOrderTimeoutMessage();
-        timeoutMessage.setSeckillOrderNo(order.getSeckillOrderNo());
-        timeoutMessage.setActivityId(order.getActivityId());
-        timeoutMessage.setGoodsId(order.getGoodsId());
-        timeoutMessage.setQuantity(order.getQuantity());
-        timeoutMessage.setExpireTime(order.getExpireTime());
-
-        rabbitTemplate.convertAndSend(
-                RabbitMqConfig.ORDER_TTL_EXCHANGE,
-                RabbitMqConfig.ORDER_TTL_ROUTING_KEY,
-                timeoutMessage,
-                this::attachDelayTtl
-        );
-    }
-
-    private Message attachDelayTtl(Message message) {
-        message.getMessageProperties().setExpiration(String.valueOf(timeoutDelayMs));
-        return message;
     }
 
     private boolean shouldRecoverByExistingOrder(IllegalArgumentException ex) {

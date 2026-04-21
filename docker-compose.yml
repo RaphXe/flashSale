@@ -267,6 +267,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
+      SPRING_THREADS_VIRTUAL_ENABLED: ${SPRING_THREADS_VIRTUAL_ENABLED:-true}
       TZ: ${TZ:-Asia/Shanghai}
     networks:
       - flashsale-network
@@ -302,6 +303,7 @@ services:
       GOODS_WARMUP_ES_INDEX_PATTERN: ${GOODS_WARMUP_ES_INDEX_PATTERN:-goods-service-*}
       GOODS_WARMUP_MAX_COUNT: ${GOODS_WARMUP_MAX_COUNT:-1000}
       GOODS_WARMUP_RATIO: ${GOODS_WARMUP_RATIO:-0.2}
+      SPRING_THREADS_VIRTUAL_ENABLED: ${SPRING_THREADS_VIRTUAL_ENABLED:-true}
       TZ: ${TZ:-Asia/Shanghai}
     logging:
       driver: fluentd
@@ -336,6 +338,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-123456}
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
+      SPRING_THREADS_VIRTUAL_ENABLED: ${SPRING_THREADS_VIRTUAL_ENABLED:-true}
       TZ: ${TZ:-Asia/Shanghai}
     networks:
       - flashsale-network
@@ -368,6 +371,7 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
       GOODS_SERVICE_BASE_URL: ${GOODS_SERVICE_BASE_URL:-http://goods-service:8082}
       STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
+      SPRING_THREADS_VIRTUAL_ENABLED: ${SPRING_THREADS_VIRTUAL_ENABLED:-true}
       TZ: ${TZ:-Asia/Shanghai}
     networks:
       - flashsale-network
@@ -400,6 +404,7 @@ services:
       RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+      SPRING_THREADS_VIRTUAL_ENABLED: ${SPRING_THREADS_VIRTUAL_ENABLED:-true}
       TZ: ${TZ:-Asia/Shanghai}
       JAVA_TOOL_OPTIONS: ${SECKILL_JAVA_TOOL_OPTIONS:--Duser.timezone=Asia/Shanghai}
       STOCK_SERVICE_BASE_URL: ${STOCK_SERVICE_BASE_URL:-http://stock-service:8083}
@@ -435,6 +440,7 @@ services:
       SECKILL_SERVICE_BASE_URL: ${SECKILL_SERVICE_BASE_URL:-http://seckill-service:8085}
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      SPRING_THREADS_VIRTUAL_ENABLED: ${SPRING_THREADS_VIRTUAL_ENABLED:-true}
       JAVA_TOOL_OPTIONS: ${GATEWAY_JAVA_TOOL_OPTIONS:--Dnetworkaddress.cache.ttl=30 -Dnetworkaddress.cache.negative.ttl=0}
       TZ: ${TZ:-Asia/Shanghai}
     ports:

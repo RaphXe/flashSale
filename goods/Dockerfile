@@ -17,6 +17,8 @@ WORKDIR /app
 
 COPY --from=builder /build/goods/target/goods-0.0.1-SNAPSHOT.jar /app/goods-service.jar
 
+ENV SPRING_THREADS_VIRTUAL_ENABLED=true
+
 EXPOSE 8082
 
 ENTRYPOINT ["java", "-jar", "goods-service.jar"]
